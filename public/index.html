@@ -58,7 +58,13 @@
         </div>
 
         <!-- Barra de estado -->
-        <div id="status" class="status">Cargando ofertas…</div>
+        <div class="toolbar">
+          <div id="status" class="status">Cargando ofertas…</div>
+          <div class="toolbar-actions">
+            <button id="btn-refresh" class="btn small" title="Volver a consultar las fuentes ahora">🔄 Actualizar búsqueda</button>
+            <button id="btn-history-toggle" class="btn small secondary" title="Ver ofertas de los últimos 30 días">🕒 Últimos 30 días</button>
+          </div>
+        </div>
 
         <!-- Lista de ofertas -->
         <div id="job-list" class="job-list"></div>

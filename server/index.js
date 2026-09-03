@@ -7,6 +7,7 @@ import { fetchJobs } from './jobSources.js';
 import { rankByRegion } from './matcher.js';
 import { generateCoverLetter, summarize } from './coverLetter.js';
 import { DEMO_JOBS } from './demoData.js';
+import { recordSearch, getHistoryForRegion } from './history.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -32,31 +33,50 @@ function sendJSON(res, code, data) {
 // Cache de la última búsqueda (30 min)
 let cache = { data: null, at: 0, online: false };
 const TTL = 30 * 60 * 1000;
+let refreshing = null; // evita refrescos simultáneos si se clickea 2 veces
 
 // Devuelve { regions, _online } con datos DEMO como respaldo cuando las fuentes
 // en vivo están bloqueadas o no devuelven ofertas. Así la app funciona siempre.
-async function getRanked() {
+// force=true ignora el cache y vuelve a consultar las fuentes ahora mismo
+// (lo usa el botón "Actualizar búsqueda").
+async function getRanked(force = false) {
   const now = Date.now();
-  if (cache.data && now - cache.at < TTL) return cache.data;
-  let jobs = [];
+  if (!force && cache.data && now - cache.at < TTL) return cache.data;
+  if (refreshing) return refreshing; // ya hay un refresh en curso, esperalo
+  refreshing = (async () => {
+    let jobs = [];
+    try {
+      jobs = await fetchJobs();
+    } catch {
+      jobs = [];
+    }
+    let ranked = rankByRegion(jobs);
+    const hasAny = Object.values(ranked).some((l) => l.length > 0);
+    let online = true;
+    if (!hasAny) {
+      // Respaldo demo: las ofertas demo ya vienen clasificadas por región,
+      // así que se usan tal cual (no se re-asignan regiones).
+      ranked = Object.fromEntries(
+        Object.entries(DEMO_JOBS).map(([region, list]) => [region, [...list].sort((a, b) => b.score - a.score)])
+      );
+      online = false;
+    } else {
+      // Solo se guarda en el historial de 30 días cuando hay datos reales
+      // (evita ensuciar el historial con ofertas demo).
+      try {
+        await recordSearch(ranked);
+      } catch {
+        // si falla el guardado en disco, no bloquea la búsqueda
+      }
+    }
+    cache = { data: { regions: ranked, _online: online }, at: Date.now(), online };
+    return cache.data;
+  })();
   try {
-    jobs = await fetchJobs();
-  } catch {
-    jobs = [];
+    return await refreshing;
+  } finally {
+    refreshing = null;
   }
-  let ranked = rankByRegion(jobs);
-  const hasAny = Object.values(ranked).some((l) => l.length > 0);
-  let online = true;
-  if (!hasAny) {
-    // Respaldo demo: las ofertas demo ya vienen clasificadas por región,
-    // así que se usan tal cual (no se re-asignan regiones).
-    ranked = Object.fromEntries(
-      Object.entries(DEMO_JOBS).map(([region, list]) => [region, [...list].sort((a, b) => b.score - a.score)])
-    );
-    online = false;
-  }
-  cache = { data: { regions: ranked, _online: online }, at: now, online };
-  return cache.data;
 }
 
 // Busca una oferta por id en todas las regiones
@@ -94,6 +114,19 @@ const server = createServer(async (req, res) => {
     const found = findById(data, id);
     if (!found) return sendJSON(res, 404, { error: 'not found' });
     return sendJSON(res, 200, generateCoverLetter(found, region));
+  }
+  if (url.pathname === '/api/refresh' && req.method === 'POST') {
+    const data = await getRanked(true);
+    return sendJSON(res, 200, { ok: true, _online: data._online, at: Date.now() });
+  }
+  if (url.pathname === '/api/history') {
+    const region = url.searchParams.get('region') || 'argentina';
+    try {
+      const jobs = await getHistoryForRegion(region);
+      return sendJSON(res, 200, { region, jobs });
+    } catch {
+      return sendJSON(res, 200, { region, jobs: [] });
+    }
   }
 
   // ---------- Archivos estáticos ----------

@@ -29,6 +29,7 @@ const FALLBACK = {
 let PROFILE = null;
 let CURRENT_REGION = 'argentina';
 let CURRENT_JOBS = {};
+let VIEW_MODE = 'live'; // 'live' | 'history'
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,7 +43,16 @@ async function init() {
   renderJobs('argentina', jobs);
   bindTabs();
   bindModals();
-  $('status').textContent = jobs._online
+  bindToolbar();
+  setStatus(jobs);
+}
+
+function setStatus(data) {
+  if (VIEW_MODE === 'history') {
+    $('status').textContent = `Mostrando ofertas activas y vistas en los últimos 30 días (${(data.jobs || []).length}).`;
+    return;
+  }
+  $('status').textContent = data._online
     ? 'Conexión exitosa con las fuentes de empleo.'
     : 'Modo demo: no se pudo contactar las fuentes en línea. Mostrando ofertas de ejemplo.';
 }
@@ -66,6 +76,14 @@ async function loadJobs(region) {
   return { region, jobs: FALLBACK.jobs[region] || [], _online: false };
 }
 
+async function loadHistory(region) {
+  try {
+    const res = await fetch(`/api/history?region=${region}`);
+    if (res.ok) return await res.json();
+  } catch {}
+  return { region, jobs: [] };
+}
+
 function renderProfile(p) {
   $('cv-name').textContent = p.fullName;
   $('cv-title').textContent = p.headline || p.title;
@@ -83,12 +101,26 @@ function matchClass(score) {
   return 'match-low';
 }
 
+function daysAgo(ts) {
+  if (!ts) return null;
+  const d = Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
+  return d;
+}
+
+function historyBadge(job) {
+  if (job.active === undefined) return '';
+  if (job.active) return '<span class="badge badge-active">🟢 Activa ahora</span>';
+  const d = daysAgo(job.lastSeen);
+  const label = d === null ? 'Vista anteriormente' : d <= 0 ? 'Vista hoy' : `Vista hace ${d} día${d === 1 ? '' : 's'}`;
+  return `<span class="badge badge-inactive">⚪ ${label} (ya no aparece)</span>`;
+}
+
 function renderJobs(region, data) {
   CURRENT_REGION = region;
   const listEl = $('job-list');
   const jobs = data.jobs || [];
   if (!jobs.length) {
-    listEl.innerHTML = '<div class="empty">No se encontraron ofertas para esta región.</div>';
+    listEl.innerHTML = `<div class="empty">${VIEW_MODE === 'history' ? 'Todavía no hay historial guardado para esta región. Corré una búsqueda primero.' : 'No se encontraron ofertas para esta región.'}</div>`;
     return;
   }
   listEl.innerHTML = jobs.map((job) => {
@@ -106,6 +138,7 @@ function renderJobs(region, data) {
           <span>📍 ${job.location || 'Remote'}</span>
           ${job.salary ? `<span>💰 ${job.salary}</span>` : ''}
         </div>
+        ${VIEW_MODE === 'history' ? `<div class="job-history">${historyBadge(job)}</div>` : ''}
         ${preview ? `<div class="job-skill-preview">${preview}</div>` : ''}
       </div>
     `;
@@ -123,13 +156,42 @@ function bindTabs() {
       tab.classList.add('active');
       const region = tab.dataset.region;
       $('status').textContent = 'Cargando ofertas…';
-      const data = await loadJobs(region);
+      const data = VIEW_MODE === 'history' ? await loadHistory(region) : await loadJobs(region);
       CURRENT_JOBS = data;
       renderJobs(region, data);
-      $('status').textContent = data._online
-        ? 'Conexión exitosa con las fuentes de empleo.'
-        : 'Modo demo: no se pudo contactar las fuentes en línea. Mostrando ofertas de ejemplo.';
+      setStatus(data);
     });
+  });
+}
+
+function bindToolbar() {
+  $('btn-refresh').addEventListener('click', async () => {
+    const btn = $('btn-refresh');
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = '🔄 Actualizando…';
+    $('status').textContent = 'Consultando las fuentes de empleo en este momento…';
+    try {
+      await fetch('/api/refresh', { method: 'POST' });
+    } catch {}
+    const data = VIEW_MODE === 'history' ? await loadHistory(CURRENT_REGION) : await loadJobs(CURRENT_REGION);
+    CURRENT_JOBS = data;
+    renderJobs(CURRENT_REGION, data);
+    setStatus(data);
+    btn.disabled = false;
+    btn.textContent = original;
+  });
+
+  $('btn-history-toggle').addEventListener('click', async () => {
+    VIEW_MODE = VIEW_MODE === 'history' ? 'live' : 'history';
+    const btn = $('btn-history-toggle');
+    btn.classList.toggle('active', VIEW_MODE === 'history');
+    btn.textContent = VIEW_MODE === 'history' ? '🔴 Ver solo activas' : '🕒 Últimos 30 días';
+    $('status').textContent = 'Cargando…';
+    const data = VIEW_MODE === 'history' ? await loadHistory(CURRENT_REGION) : await loadJobs(CURRENT_REGION);
+    CURRENT_JOBS = data;
+    renderJobs(CURRENT_REGION, data);
+    setStatus(data);
   });
 }
 

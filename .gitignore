@@ -2,6 +2,7 @@ no_subir/
 
 node_modules/
 dist/
+data/
 
 .env
 .env.*
