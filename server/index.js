@@ -12,7 +12,10 @@ import { CONSULTORAS } from './consultoras.js';
 import { loadStatus, setStatus, ESTADOS } from './consultorasStore.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const PUBLIC_DIR = join(__dirname, '..', 'public');
+// El frontend ahora es una app React compilada con Vite (ver /frontend).
+// `npm start` corre `npm run build` antes de levantar el server, así que esta
+// carpeta siempre existe cuando el server arranca en producción.
+const PUBLIC_DIR = join(__dirname, '..', 'frontend', 'dist');
 const PORT = process.env.PORT || 3000;
 
 const MIME = {
