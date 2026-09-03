@@ -31,6 +31,29 @@ let CURRENT_REGION = 'argentina';
 let CURRENT_JOBS = {};
 let VIEW_MODE = 'live'; // 'live' | 'history'
 
+// LinkedIn no tiene API pública de empleos (solo para partners aprobados) y
+// scrapearlo viola sus términos de uso. En vez de traer resultados
+// automáticos, armamos un link directo a la búsqueda ya filtrada para que
+// el usuario la abra y revise con su propia cuenta.
+const REGION_LOCATION = {
+  argentina: 'Argentina',
+  europa: 'Europe',
+  eeuu: 'United States',
+};
+
+function linkedinSearchUrl(keywords, region) {
+  const params = new URLSearchParams({
+    keywords,
+    location: REGION_LOCATION[region] || '',
+  });
+  return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
+}
+
+function updateLinkedInToolbarLink(region) {
+  const kw = (PROFILE && (PROFILE.title || PROFILE.headline)) || 'QA Engineer';
+  $('btn-linkedin').href = linkedinSearchUrl(kw, region);
+}
+
 const $ = (id) => document.getElementById(id);
 
 init();
@@ -44,6 +67,7 @@ async function init() {
   bindTabs();
   bindModals();
   bindToolbar();
+  updateLinkedInToolbarLink('argentina');
   setStatus(jobs);
 }
 
@@ -159,6 +183,7 @@ function bindTabs() {
       const data = VIEW_MODE === 'history' ? await loadHistory(region) : await loadJobs(region);
       CURRENT_JOBS = data;
       renderJobs(region, data);
+      updateLinkedInToolbarLink(region);
       setStatus(data);
     });
   });
@@ -246,6 +271,7 @@ function showDetail(job, summary, region) {
       ${job.applyUrl && job.applyUrl !== '#' ? `<a class="btn" href="${job.applyUrl}" target="_blank" rel="noopener">${langIsEn ? 'Apply on portal' : 'Aplicar en el portal'}</a>` : ''}
       <button class="btn" id="btn-letter">${langIsEn ? 'Generate cover letter' : 'Generar carta de presentación'}</button>
       <button class="btn secondary" id="btn-copy-resume">${langIsEn ? 'Copy CV text' : 'Copiar resumen del CV'}</button>
+      <a class="btn secondary" href="${linkedinSearchUrl(`${job.title} ${job.company}`, region)}" target="_blank" rel="noopener" title="${langIsEn ? 'Search on LinkedIn (not scraped, opens LinkedIn directly)' : 'Buscar en LinkedIn (no se scrapea, abre LinkedIn directamente)'}">🔗 ${langIsEn ? 'Search on LinkedIn' : 'Buscar en LinkedIn'}</a>
     </div>
   `;
   $('modal').classList.remove('hidden');
