@@ -17,6 +17,10 @@ export const REGION_LOCATION = {
   argentina: 'Argentina',
   europa: 'Europe',
   eeuu: 'United States',
+  mexico: 'México',
+  peru: 'Perú',
+  colombia: 'Colombia',
+  chile: 'Chile',
 };
 
 export function linkedinSearchUrl(keywords, region) {
@@ -29,4 +33,6 @@ export const CATEGORY_CLASS = {
   'Consultora IT con área QA': 'cat-it',
   'Multinacional con oficina AR': 'cat-multi',
   'Staffing / recruiting IT': 'cat-staffing',
+  'Banco / Fintech / Billetera': 'cat-fintech',
+  'Gobierno / Sector Público': 'cat-gov',
 };

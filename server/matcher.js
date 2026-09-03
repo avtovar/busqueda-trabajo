@@ -22,6 +22,7 @@ const ROLE_SYNONYMS = [
   { role: 'automation', words: ['automation', 'sdet', 'test engineer'] },
   { role: 'devops', words: ['devops', 'ci/cd', 'azure'] },
   { role: 'fullstack', words: ['full', 'front', 'backend'] },
+  { role: 'analista', words: ['analista funcional', 'functional analyst', 'analista de testing', 'analista qa'] },
 ];
 
 function roleHits(job) {
@@ -67,7 +68,7 @@ export function computeMatch(job) {
   // QA/testing o que lo mencionen en el título/tags. Esto evita que ofertas de
   // "AI", "Developer", "Product Owner" etc. aparezcan solo por mencionar un skill.
   const isQARelevant =
-    roles.some((r) => ['qa', 'tester', 'automation'].includes(r)) ||
+    roles.some((r) => ['qa', 'tester', 'automation', 'analista'].includes(r)) ||
     BASE_KEYWORDS.some((k) => title.includes(k)) ||
     (job.tags || []).some((t) => BASE_KEYWORDS.some((k) => t.includes(k)));
   if (!isQARelevant) {
@@ -90,7 +91,7 @@ export function computeMatch(job) {
     gain += weight * (inTitle ? 1.5 : 1);
   }
   const coverage = total > 0 ? gain / total : 0;
-  const roleAffinity = roles.filter((r) => ['qa', 'tester', 'automation'].includes(r)).length;
+  const roleAffinity = roles.filter((r) => ['qa', 'tester', 'automation', 'analista'].includes(r)).length;
 
   let score = 0;
   score += coverage * 55;
@@ -123,16 +124,26 @@ function assignRegion(job) {
   const hasARG = /\b(argentina|buenos aires|bs as|capital federal)\b/.test(loc);
   const hasEU = /\b(spain|espana|germany|france|netherlands|uk|united kingdom|ireland|portugal|london|berlin|madrid|europe)\b/.test(loc);
   const hasUS = /\b(usa|united states|new york|san francisco|remote[- ]?us)\b/.test(loc);
+  const hasMX = /\b(mexico|cdmx|ciudad de mexico|queretaro|guadalajara|monterrey|puebla)\b/.test(loc);
+  const hasPE = /\b(peru|lima)\b/.test(loc);
+  const hasCO = /\b(colombia|bogota|barranquilla|medellin|cali)\b/.test(loc);
+  const hasCL = /\b(chile|santiago|las condes|providencia|valparaiso|concepcion)\b/.test(loc);
 
   if (job.regionGuess === 'argentina' || hasARG) return 'argentina';
   if (job.regionGuess === 'europa' || hasEU) return 'europa';
   if (job.regionGuess === 'eeuu' || hasUS) return 'eeuu';
+  if (job.regionGuess === 'mexico' || hasMX) return 'mexico';
+  if (job.regionGuess === 'peru' || hasPE) return 'peru';
+  if (job.regionGuess === 'colombia' || hasCO) return 'colombia';
+  if (job.regionGuess === 'chile' || hasCL) return 'chile';
   return 'eeuu'; // remoto global -> eeuu por defecto
 }
 
-// Ranking maestro: devuelve { regionKey: [jobs top 10 con match] }
-export function rankByRegion(jobs, topN = 10) {
-  const buckets = { argentina: [], europa: [], eeuu: [] };
+// Ranking maestro: devuelve { regionKey: [jobs con match > 0, ordenados por score] }.
+// Se devuelven TODAS las ofertas relevantes (sin recortar); la paginación la hace
+// el frontend. topN se mantiene por compatibilidad pero ya no se usa.
+export function rankByRegion(jobs, topN = 0) {
+  const buckets = { argentina: [], europa: [], eeuu: [], mexico: [], peru: [], colombia: [], chile: [] };
   for (const job of jobs) {
     const region = assignRegion(job);
     const match = computeMatch(job);
@@ -140,11 +151,11 @@ export function rankByRegion(jobs, topN = 10) {
     if (!buckets[region]) continue;
     buckets[region].push({ ...job, ...match });
   }
-  // Ordena y recorta cada región de forma independiente (sin colapsos entre regiones)
+  // Ordena cada región de forma independiente (sin colapsos entre regiones)
   const result = {};
   for (const [region, list] of Object.entries(buckets)) {
     list.sort((a, b) => b.score - a.score);
-    result[region] = list.slice(0, topN);
+    result[region] = topN > 0 ? list.slice(0, topN) : list;
   }
   return result;
 }

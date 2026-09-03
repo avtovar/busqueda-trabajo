@@ -176,9 +176,17 @@ export function guessRegionFromText(text) {
   const arg = /\b(argentina|buenos aires|bs as|capital federal|mar del plata|rosario|cordoba)\b/;
   const us = /\b(usa|united states|new york|san francisco|los angeles|remote[- ]?us|us only|texas|california)\b/;
   const eu = /\b(spain|espana|madrid|barcelona|germany|berlin|france|paris|netherlands|amsterdam|uk|united kingdom|london|ireland|dublin|portugal|lisbon|remoto|remote eu)\b/;
+  const mx = /\b(mexico|mexico|cdmx|ciudad de mexico|queretaro|guadalajara|monterrey|puebla)\b/;
+  const pe = /\b(peru|peru|lima)\b/;
+  const co = /\b(colombia|bogota|barranquilla|medellin|cali)\b/;
+  const cl = /\b(chile|santiago|las condes|providencia|valparaiso|concepcion)\b/;
   if (arg.test(t)) return 'argentina';
   if (us.test(t)) return 'eeuu';
   if (eu.test(t)) return 'europa';
+  if (mx.test(t)) return 'mexico';
+  if (pe.test(t)) return 'peru';
+  if (co.test(t)) return 'colombia';
+  if (cl.test(t)) return 'chile';
   // Default: remoto deslocalizado suele ser oportunidad para Argentina/global; lo dejamos eeuu (remote global)
   return 'eeuu';
 }

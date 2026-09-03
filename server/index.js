@@ -7,6 +7,7 @@ import { fetchJobs } from './jobSources.js';
 import { rankByRegion } from './matcher.js';
 import { generateCoverLetter, summarize } from './coverLetter.js';
 import { DEMO_JOBS } from './demoData.js';
+import { CURATED_JOBS } from './curatedJobs.js';
 import { recordSearch, getHistoryForRegion } from './history.js';
 import { CONSULTORAS } from './consultoras.js';
 import { loadStatus, setStatus, ESTADOS } from './consultorasStore.js';
@@ -73,6 +74,9 @@ async function getRanked(force = false) {
     } catch {
       jobs = [];
     }
+    // Ofertas relevadas a mano (bolsas propias: mail/portal/LinkedIn) siempre
+    // se incluyen en la búsqueda, exclusivas de la región Argentina.
+    jobs = [...jobs, ...CURATED_JOBS];
     let ranked = rankByRegion(jobs);
     const hasAny = Object.values(ranked).some((l) => l.length > 0);
     let online = true;
@@ -84,7 +88,7 @@ async function getRanked(force = false) {
       );
       online = false;
     } else {
-      // Solo se guarda en el historial de 30 días cuando hay datos reales
+      // Solo se guarda en el historial cuando hay datos reales
       // (evita ensuciar el historial con ofertas demo).
       try {
         await recordSearch(ranked);
@@ -121,7 +125,8 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api/jobs') {
     const region = (url.searchParams.get('region') || 'argentina');
     const data = await getRanked();
-    return sendJSON(res, 200, { region, jobs: data.regions[region] || [], _online: data._online });
+    const jobs = data.regions[region] || [];
+    return sendJSON(res, 200, { region, jobs, total: jobs.length, _online: data._online });
   }
   if (url.pathname === '/api/job') {
     const query = url.searchParams.get('q') || '';
@@ -159,7 +164,8 @@ const server = createServer(async (req, res) => {
       estado: status[c.id]?.estado || 'Sin contactar',
       fecha: status[c.id]?.fecha || '',
       notas: status[c.id]?.notas || '',
-    }));
+    }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     return sendJSON(res, 200, { consultoras: list, estados: ESTADOS });
   }
   if (url.pathname === '/api/consultoras/status' && req.method === 'POST') {

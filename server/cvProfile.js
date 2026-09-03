@@ -145,6 +145,26 @@ const PROFILE = {
       lang: 'en',
       countries: ['United States', 'USA', 'EEUU', 'EE.UU', 'Remote - US'],
     },
+    mexico: {
+      label: 'México',
+      lang: 'es',
+      countries: ['Mexico', 'México', 'CDMX', 'Ciudad de México', 'Querétaro', 'Guadalajara'],
+    },
+    peru: {
+      label: 'Perú',
+      lang: 'es',
+      countries: ['Peru', 'Perú', 'Lima'],
+    },
+    colombia: {
+      label: 'Colombia',
+      lang: 'es',
+      countries: ['Colombia', 'Bogotá', 'Barranquilla', 'Medellín'],
+    },
+    chile: {
+      label: 'Chile',
+      lang: 'es',
+      countries: ['Chile', 'Santiago', 'Las Condes'],
+    },
   },
 };
 

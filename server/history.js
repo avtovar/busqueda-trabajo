@@ -1,6 +1,6 @@
 // Historial persistente de búsquedas: guarda cada oferta vista en disco
-// (data/history.json) para poder mostrar "últimos 30 días" aunque el server
-// se reinicie. No usa base de datos, es un archivo JSON simple.
+// (data/history.json) para poder mostrarlo aunque el server se reinicie.
+// No usa base de datos, es un archivo JSON simple.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 const DATA_FILE = join(DATA_DIR, 'history.json');
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
+// Conserva el historial desde el 1 de enero de 2026 (en vez de una ventana móvil).
+const CUTOFF_MS = Date.parse('2026-01-01T00:00:00-03:00');
 
 async function ensureDir() {
   try {
@@ -39,7 +40,7 @@ async function save(history) {
 // Registra las ofertas de la búsqueda actual (por región) en el historial.
 // - Si una oferta ya existía, actualiza lastSeen (sigue activa) y conserva firstSeen.
 // - Si es nueva, la agrega con firstSeen = ahora.
-// - Purga entradas con más de 30 días sin aparecer en ninguna búsqueda.
+// - Purga entradas con lastSeen anterior al 1 de enero de 2026.
 export async function recordSearch(rankedByRegion) {
   const history = await load();
   const now = Date.now();
@@ -57,7 +58,7 @@ export async function recordSearch(rankedByRegion) {
     }
   }
 
-  const cutoff = now - RETENTION_MS;
+  const cutoff = CUTOFF_MS;
   for (const [key, entry] of Object.entries(history.entries)) {
     if (entry.lastSeen < cutoff) delete history.entries[key];
   }
@@ -67,11 +68,11 @@ export async function recordSearch(rankedByRegion) {
   return history;
 }
 
-// Devuelve las ofertas de los últimos 30 días para una región, marcando
-// cuáles siguen "activas" (aparecieron en la última búsqueda) y cuáles no.
+// Devuelve las ofertas registradas desde el 1 de enero de 2026 para una región,
+// marcando cuáles siguen "activas" (aparecieron en la última búsqueda) y cuáles no.
 export async function getHistoryForRegion(region) {
   const history = await load();
-  const cutoff = Date.now() - RETENTION_MS;
+  const cutoff = CUTOFF_MS;
   return Object.values(history.entries)
     .filter((e) => e.region === region && e.lastSeen >= cutoff)
     .map((e) => ({

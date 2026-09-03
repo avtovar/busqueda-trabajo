@@ -22,9 +22,9 @@ export default function Toolbar({
           <button
             className={`btn small secondary${viewMode === 'history' ? ' active' : ''}`}
             onClick={onToggleHistory}
-            title="Ver ofertas de los últimos 30 días"
+            title="Ver ofertas vistas desde enero 2026"
           >
-            {viewMode === 'history' ? '🔴 Ver solo activas' : '🕒 Últimos 30 días'}
+            {viewMode === 'history' ? '🔴 Ver solo activas' : '🕒 Desde enero 2026'}
           </button>
           <a
             className="btn small secondary"

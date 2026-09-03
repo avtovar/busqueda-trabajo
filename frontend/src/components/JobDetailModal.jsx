@@ -1,19 +1,68 @@
+import { useState } from 'react';
 import { matchClass, linkedinSearchUrl } from '../utils.js';
 
+function copyText(txt) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(txt);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy') ? resolve() : reject(new Error('copy falló'));
+    } catch (e) {
+      reject(e);
+    } finally {
+      document.body.removeChild(ta);
+    }
+  });
+}
+
 export default function JobDetailModal({ job, summary, region, profile, onClose, onGenerateLetter }) {
+  const [copied, setCopied] = useState(false);
   if (!job) return null;
   const s = summary || {
     companySummary: `${job.company} busca "${job.title}".`,
     requiredSkills: job.matched || [],
   };
-  const langIsEn = region !== 'argentina';
+  const langIsEn = region === 'europa' || region === 'eeuu';
   const wanted = s.requiredSkills || [];
   const gaps = job.missed || [];
 
+  function buildResumeText() {
+    const skills = wanted.join(', ');
+    const headline = profile.headline || profile.title || '';
+    const header = [profile.fullName, headline, profile.location].filter(Boolean);
+    const lines = [];
+    if (skills) {
+      lines.push(`${profile.fullName} — ${skills}.`);
+      lines.push(`${headline}.`);
+    } else {
+      lines.push(profile.fullName);
+      lines.push(`${headline}.`);
+    }
+    lines.push('');
+    lines.push(`Aplico a: ${job.title} en ${job.company}.`);
+    lines.push(profile.summary || '');
+    return lines.join('\n');
+  }
+
   function copyResume() {
     if (!profile) return;
-    const txt = `${profile.fullName}\n${profile.headline || profile.title}\n${profile.location}\n\n${profile.summary || ''}`;
-    navigator.clipboard.writeText(txt);
+    const txt = buildResumeText();
+    copyText(txt)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        window.prompt('Copiá el texto manualmente (Ctrl+C):', txt);
+      });
   }
 
   return (
@@ -63,7 +112,9 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
             {langIsEn ? 'Generate cover letter' : 'Generar carta de presentación'}
           </button>
           <button className="btn secondary" onClick={copyResume}>
-            {langIsEn ? 'Copy CV text' : 'Copiar resumen del CV'}
+            {copied
+              ? (langIsEn ? '✓ Copied' : '✓ Resumen copiado')
+              : (langIsEn ? 'Copy CV text' : 'Copiar resumen del CV')}
           </button>
           <a
             className="btn secondary"

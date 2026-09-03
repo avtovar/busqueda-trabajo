@@ -101,7 +101,7 @@ export default function App() {
     }
     if (loading) return 'Cargando…';
     if (viewMode === 'history') {
-      return `Mostrando ofertas activas y vistas en los últimos 30 días (${(jobsData.jobs || []).length}).`;
+      return `Mostrando ofertas activas y vistas desde enero 2026 (${(jobsData.jobs || []).length}).`;
     }
     return jobsData._online
       ? 'Conexión exitosa con las fuentes de empleo.'
@@ -138,7 +138,7 @@ export default function App() {
           {region === 'consultoras' ? (
             <ConsultorasList consultoras={consultoras} estados={estados} onChange={handleConsultoraChange} />
           ) : (
-            <JobList jobs={jobsData.jobs || []} viewMode={viewMode} onOpen={openDetail} />
+            <JobList key={`${region}-${viewMode}`} jobs={jobsData.jobs || []} viewMode={viewMode} onOpen={openDetail} />
           )}
         </section>
       </main>

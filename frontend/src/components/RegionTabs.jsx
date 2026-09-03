@@ -1,5 +1,9 @@
 const TABS = [
   { region: 'argentina', label: '🇦🇷 Argentina' },
+  { region: 'mexico', label: '🇲🇽 México' },
+  { region: 'peru', label: '🇵🇪 Perú' },
+  { region: 'colombia', label: '🇨🇴 Colombia' },
+  { region: 'chile', label: '🇨🇱 Chile' },
   { region: 'europa', label: '🇪🇺 Europa' },
   { region: 'eeuu', label: '🇺🇸 Estados Unidos' },
 ];
