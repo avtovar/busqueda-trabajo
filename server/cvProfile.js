@@ -114,6 +114,17 @@ const PROFILE = {
     { name: 'html', aliases: ['html'], has: false },
     { name: 'css', aliases: ['css'], has: false },
     { name: 'react', aliases: ['react'], has: false },
+    { name: 'maestro', aliases: ['maestro'], has: true, weight: 0.8 },
+    { name: 'testrail', aliases: ['testrail'], has: false },
+    { name: 'zephyr', aliases: ['zephyr'], has: false },
+    { name: 'soapui', aliases: ['soapui', 'ready api', 'readyapi'], has: false },
+    { name: 'browserstack', aliases: ['browserstack'], has: false },
+    { name: 'sauce labs', aliases: ['sauce labs', 'saucelabs'], has: false },
+    { name: 'testng', aliases: ['testng'], has: false },
+    { name: 'junit', aliases: ['junit'], has: false },
+    { name: 'webdriverio', aliases: ['webdriverio', 'webdriver.io'], has: false },
+    { name: 'robot framework', aliases: ['robot framework'], has: false },
+    { name: 'testcafe', aliases: ['testcafe'], has: false },
   ],
 
   // Regiones soportadas

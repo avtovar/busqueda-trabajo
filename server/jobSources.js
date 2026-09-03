@@ -38,28 +38,56 @@ function firstSalary(j) {
 }
 
 /* ----------------------- Remotive (remote global, tech) ------------------- */
-async function fetchRemotive() {
-  const data = await getJSON('https://remotive.com/api/remote-jobs?search=qa');
-  const jobs = (data && data.jobs) || [];
-  return jobs.map((j) => ({
+// Antes solo buscaba "qa" y se perdían ofertas tituladas "Tester", "SDET",
+// "Automation Engineer", etc. Ahora busca varios términos en paralelo y
+// deduplica por id de Remotive.
+const REMOTIVE_TERMS = ['qa', 'tester', 'sdet', 'automation', 'quality assurance'];
+
+function mapRemotiveJob(j) {
+  return {
     id: `remotive-${j.id}`,
     source: 'Remotive',
     title: clean(j.title),
     company: clean(j.company_name),
-    location: clean(j.candidate_required_location || j.candidate_required_location) || 'Remote',
+    location: clean(j.candidate_required_location) || 'Remote',
     regionGuess: guessRegionFromText(`${j.candidate_required_location} ${j.tags}`),
     applyUrl: j.url || j.application_url || '',
     description: clean(j.description),
     tags: tagsOf(j.tags),
     salary: j.salary && clean(j.salary) ? clean(j.salary) : '',
     date: j.publication_date || '',
-  }));
+  };
+}
+
+async function fetchRemotive() {
+  const results = await Promise.allSettled(
+    REMOTIVE_TERMS.map((term) => getJSON(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(term)}`))
+  );
+  const seen = new Set();
+  const jobs = [];
+  for (const r of results) {
+    if (r.status !== 'fulfilled') continue;
+    for (const j of (r.value && r.value.jobs) || []) {
+      if (seen.has(j.id)) continue;
+      seen.add(j.id);
+      jobs.push(mapRemotiveJob(j));
+    }
+  }
+  return jobs;
 }
 
 /* --------------------- Arbeitnow (Europa / global dev) -------------------- */
+// La API pagina de a ~100 ofertas; traemos 2 páginas para no perder ofertas QA
+// que suelen quedar diluidas entre ofertas de desarrollo.
 async function fetchArbeitnow() {
-  const data = await getJSON('https://www.arbeitnow.com/api/job-board-api');
-  const jobs = (data && data.data) || [];
+  const pages = await Promise.allSettled([
+    getJSON('https://www.arbeitnow.com/api/job-board-api'),
+    getJSON('https://www.arbeitnow.com/api/job-board-api?page=2'),
+  ]);
+  const jobs = [];
+  for (const p of pages) {
+    if (p.status === 'fulfilled' && Array.isArray(p.value?.data)) jobs.push(...p.value.data);
+  }
   return jobs.map((j) => ({
     id: `arbeitnow-${j.slug || j.id}`,
     source: 'Arbeitnow',
@@ -94,6 +122,53 @@ async function fetchHimalayas() {
   }));
 }
 
+/* --------------------------- RemoteOK (remote global) ---------------------- */
+// La API no tiene parámetro de búsqueda: devuelve el feed completo y el primer
+// elemento es un aviso legal (sin campo "id"), hay que filtrarlo.
+async function fetchRemoteOK() {
+  const data = await getJSON('https://remoteok.com/api');
+  const jobs = Array.isArray(data) ? data.filter((j) => j && j.id) : [];
+  return jobs
+    .filter((j) => {
+      const text = `${j.position || ''} ${(j.tags || []).join(' ')}`.toLowerCase();
+      return BASE_KEYWORDS.some((k) => text.includes(k));
+    })
+    .map((j) => ({
+      id: `remoteok-${j.id}`,
+      source: 'RemoteOK',
+      title: clean(j.position),
+      company: clean(j.company),
+      location: clean(j.location) || 'Remote',
+      regionGuess: guessRegionFromText(j.location),
+      applyUrl: j.url ? `https://remoteok.com${j.url}` : (j.apply_url || ''),
+      description: clean(j.description),
+      tags: tagsOf(j.tags),
+      salary: firstSalary(j),
+      date: j.date || '',
+    }));
+}
+
+/* ---------------------------- Jobicy (remote global) ------------------------ */
+async function fetchJobicy() {
+  const data = await getJSON('https://jobicy.com/api/v2/remote-jobs?count=50&tag=qa');
+  const jobs = (data && data.jobs) || [];
+  return jobs.map((j) => ({
+    id: `jobicy-${j.id}`,
+    source: 'Jobicy',
+    title: clean(j.jobTitle),
+    company: clean(j.companyName),
+    location: clean(j.jobGeo) || 'Remote',
+    regionGuess: guessRegionFromText(j.jobGeo),
+    applyUrl: j.url || '',
+    description: clean(j.jobExcerpt || j.jobDescription),
+    tags: tagsOf(j.jobIndustry || j.jobType),
+    salary: (j.annualSalaryMin || j.annualSalaryMax)
+      ? `${j.salaryCurrency || 'USD'} ${j.annualSalaryMin || ''}${j.annualSalaryMax ? ' - ' + j.annualSalaryMax : ''}`.trim()
+      : '',
+    date: j.pubDate || '',
+  }));
+}
+
 /* -------------------- Clasificación de región (mejorada) ------------------- */
 // Detecta si el texto de ubicación pertenece a Argentina, Europa o EEUU.
 export function guessRegionFromText(text) {
@@ -108,13 +183,30 @@ export function guessRegionFromText(text) {
   return 'eeuu';
 }
 
+// Clave de deduplicación: mismo título + misma empresa suele ser la misma
+// oferta publicada en varias bolsas (muy común entre Remotive/RemoteOK/Jobicy).
+function dedupeKey(job) {
+  return `${job.title}::${job.company}`.toLowerCase().replace(/[^a-z0-9:]+/g, ' ').trim();
+}
+
 /* --------------------------- Agregador maestro --------------------------- */
 export async function fetchJobs() {
-  const results = await Promise.allSettled([fetchRemotive(), fetchArbeitnow(), fetchHimalayas()]);
+  const results = await Promise.allSettled([
+    fetchRemotive(),
+    fetchArbeitnow(),
+    fetchHimalayas(),
+    fetchRemoteOK(),
+    fetchJobicy(),
+  ]);
+  const seen = new Set();
   const jobs = [];
   for (const r of results) {
-    if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-      jobs.push(...r.value);
+    if (r.status !== 'fulfilled' || !Array.isArray(r.value)) continue;
+    for (const job of r.value) {
+      const key = dedupeKey(job);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      jobs.push(job);
     }
   }
   return jobs;
