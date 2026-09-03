@@ -73,6 +73,17 @@ body {
 .badge-active { background: rgba(34, 197, 94, 0.18); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.4); }
 .badge-inactive { background: rgba(148, 163, 184, 0.15); color: var(--muted); border: 1px solid var(--border); }
 
+/* ----- Consultoras QA (outreach tracker) ----- */
+.region-tab.consultoras-tab { margin-left: auto; }
+.cat-pill { font-size: 0.68rem; padding: 3px 10px; border-radius: 20px; white-space: nowrap; border: 1px solid transparent; }
+.cat-qa { background: rgba(34, 197, 94, 0.15); color: var(--green); border-color: rgba(34, 197, 94, 0.35); }
+.cat-it { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-color: rgba(59, 130, 246, 0.35); }
+.cat-multi { background: rgba(245, 158, 11, 0.18); color: #b45309; border-color: rgba(245, 158, 11, 0.4); }
+.cat-staffing { background: rgba(236, 72, 153, 0.15); color: #db2777; border-color: rgba(236, 72, 153, 0.35); }
+.consultora-controls { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.estado-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg, #fff); font-size: 0.82rem; color: inherit; }
+.notas-input { flex: 1; min-width: 180px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 0.82rem; background: var(--card-bg, #fff); color: inherit; }
+
 /* ----- Lista de ofertas ----- */
 .job-list { display: flex; flex-direction: column; gap: 12px; }
 .job-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; cursor: pointer; transition: transform 0.12s, border-color 0.12s; box-shadow: var(--shadow); }

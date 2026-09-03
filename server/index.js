@@ -8,6 +8,8 @@ import { rankByRegion } from './matcher.js';
 import { generateCoverLetter, summarize } from './coverLetter.js';
 import { DEMO_JOBS } from './demoData.js';
 import { recordSearch, getHistoryForRegion } from './history.js';
+import { CONSULTORAS } from './consultoras.js';
+import { loadStatus, setStatus, ESTADOS } from './consultorasStore.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -28,6 +30,24 @@ const MIME = {
 function sendJSON(res, code, data) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 1_000_000) req.destroy(); // límite de seguridad, 1MB
+    });
+    req.on('end', () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch {
+        reject(new Error('JSON inválido'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 // Cache de la última búsqueda (30 min)
@@ -126,6 +146,30 @@ const server = createServer(async (req, res) => {
       return sendJSON(res, 200, { region, jobs });
     } catch {
       return sendJSON(res, 200, { region, jobs: [] });
+    }
+  }
+
+  if (url.pathname === '/api/consultoras') {
+    const status = await loadStatus();
+    const list = CONSULTORAS.map((c) => ({
+      ...c,
+      estado: status[c.id]?.estado || 'Sin contactar',
+      fecha: status[c.id]?.fecha || '',
+      notas: status[c.id]?.notas || '',
+    }));
+    return sendJSON(res, 200, { consultoras: list, estados: ESTADOS });
+  }
+  if (url.pathname === '/api/consultoras/status' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const { id, estado, fecha, notas } = body;
+      if (!id || !CONSULTORAS.some((c) => c.id === id)) {
+        return sendJSON(res, 400, { error: 'id de consultora inválido' });
+      }
+      const saved = await setStatus(id, { estado, fecha, notas });
+      return sendJSON(res, 200, { ok: true, id, ...saved });
+    } catch (e) {
+      return sendJSON(res, 400, { error: e.message || 'solicitud inválida' });
     }
   }
 

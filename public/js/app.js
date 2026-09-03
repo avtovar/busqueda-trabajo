@@ -30,6 +30,14 @@ let PROFILE = null;
 let CURRENT_REGION = 'argentina';
 let CURRENT_JOBS = {};
 let VIEW_MODE = 'live'; // 'live' | 'history'
+let CONSULTORAS_ESTADOS = ['Sin contactar', 'Contactado', 'Respondió', 'Entrevista agendada', 'Descartada'];
+
+const CATEGORY_CLASS = {
+  'Especializada en QA': 'cat-qa',
+  'Consultora IT con área QA': 'cat-it',
+  'Multinacional con oficina AR': 'cat-multi',
+  'Staffing / recruiting IT': 'cat-staffing',
+};
 
 // LinkedIn no tiene API pública de empleos (solo para partners aprobados) y
 // scrapearlo viola sus términos de uso. En vez de traer resultados
@@ -108,6 +116,30 @@ async function loadHistory(region) {
   return { region, jobs: [] };
 }
 
+async function loadConsultoras() {
+  try {
+    const res = await fetch('/api/consultoras');
+    if (res.ok) {
+      const data = await res.json();
+      CONSULTORAS_ESTADOS = data.estados || CONSULTORAS_ESTADOS;
+      return data.consultoras || [];
+    }
+  } catch {}
+  return [];
+}
+
+async function saveConsultoraStatus(id, patch) {
+  try {
+    await fetch('/api/consultoras/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...patch }),
+    });
+  } catch {
+    // si falla el guardado, el cambio queda solo visual hasta el próximo refresh
+  }
+}
+
 function renderProfile(p) {
   $('cv-name').textContent = p.fullName;
   $('cv-title').textContent = p.headline || p.title;
@@ -173,18 +205,82 @@ function renderJobs(region, data) {
   });
 }
 
+function renderConsultoras(list) {
+  const listEl = $('job-list');
+  if (!list.length) {
+    listEl.innerHTML = '<div class="empty">No se pudo cargar el listado de consultoras. Probá recargar la página.</div>';
+    return;
+  }
+  const estadoOptions = (current) => CONSULTORAS_ESTADOS
+    .map((e) => `<option value="${e}" ${e === current ? 'selected' : ''}>${e}</option>`)
+    .join('');
+
+  listEl.innerHTML = list.map((c) => `
+    <div class="job-card consultora-card" data-id="${c.id}">
+      <div class="job-top">
+        <div>
+          <div class="job-title">${c.name}</div>
+          <div class="job-company">${c.city || ''}</div>
+        </div>
+        <span class="cat-pill ${CATEGORY_CLASS[c.category] || ''}">${c.category}</span>
+      </div>
+      ${c.note ? `<div class="job-meta"><span>${c.note}</span></div>` : ''}
+      <div class="consultora-controls">
+        <select class="estado-select" data-id="${c.id}">${estadoOptions(c.estado)}</select>
+        ${c.link ? `<a class="btn small secondary" href="${c.link}" target="_blank" rel="noopener">🔗 Ver perfil</a>` : ''}
+        <input class="notas-input" type="text" placeholder="Notas (contacto, entrevistador, etc.)" value="${(c.notas || '').replace(/"/g, '&quot;')}" data-id="${c.id}" />
+      </div>
+    </div>
+  `).join('');
+
+  listEl.querySelectorAll('.estado-select').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const id = sel.dataset.id;
+      saveConsultoraStatus(id, { estado: sel.value, fecha: new Date().toISOString().slice(0, 10) });
+    });
+    sel.addEventListener('click', (e) => e.stopPropagation());
+  });
+  listEl.querySelectorAll('.notas-input').forEach((input) => {
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('change', (e) => {
+      saveConsultoraStatus(input.dataset.id, { notas: input.value });
+    });
+  });
+}
+
+function toggleToolbarForRegion(region) {
+  const isConsultoras = region === 'consultoras';
+  ['btn-refresh', 'btn-history-toggle', 'btn-linkedin'].forEach((id) => {
+    $(id).style.display = isConsultoras ? 'none' : '';
+  });
+}
+
+async function goToRegion(region) {
+  toggleToolbarForRegion(region);
+  if (region === 'consultoras') {
+    $('status').textContent = 'Cargando consultoras…';
+    const list = await loadConsultoras();
+    CURRENT_JOBS = { jobs: list };
+    CURRENT_REGION = region;
+    renderConsultoras(list);
+    $('status').textContent = `${list.length} consultoras de referencia para outreach. El estado de contacto se guarda automáticamente.`;
+    return;
+  }
+  $('status').textContent = 'Cargando ofertas…';
+  const data = VIEW_MODE === 'history' ? await loadHistory(region) : await loadJobs(region);
+  CURRENT_JOBS = data;
+  renderJobs(region, data);
+  updateLinkedInToolbarLink(region);
+  setStatus(data);
+}
+
 function bindTabs() {
   document.querySelectorAll('.region-tab').forEach((tab) => {
     tab.addEventListener('click', async () => {
       document.querySelectorAll('.region-tab').forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
-      const region = tab.dataset.region;
-      $('status').textContent = 'Cargando ofertas…';
-      const data = VIEW_MODE === 'history' ? await loadHistory(region) : await loadJobs(region);
-      CURRENT_JOBS = data;
-      renderJobs(region, data);
-      updateLinkedInToolbarLink(region);
-      setStatus(data);
+      await goToRegion(tab.dataset.region);
     });
   });
 }
