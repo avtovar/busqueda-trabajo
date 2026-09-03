@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BuscaEmpleo · Mi próximo trabajo QA</title>
+  <meta name="description" content="Buscador de las mejores ofertas de empleo adaptadas al perfil de Ali Tovar (QA Engineer), separadas por región." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ============ HEADER ============ -->
+    <header class="app-header">
+      <div class="header-inner">
+        <h1>🎯 BuscaEmpleo</h1>
+        <p class="subtitle">Las mejores ofertas para <strong>Ali Tovar</strong> · QA Engineer</p>
+      </div>
+    </header>
+
+    <!-- ============ PANEL PRINCIPAL ============ -->
+    <main class="layout">
+      <!-- Columna izquierda: CV -->
+      <aside class="cv-panel panel">
+        <div class="cv-header">
+          <div class="avatar">AT</div>
+          <div>
+            <h2 id="cv-name">Ali Valentin Tovar Morales</h2>
+            <p id="cv-title" class="cv-role">QA Engineer | Manual & Automation · API Testing</p>
+            <p id="cv-location" class="cv-loc">📍 Buenos Aires, Argentina</p>
+          </div>
+        </div>
+        <div class="cv-section">
+          <h3>Sobre mí</h3>
+          <p id="cv-summary" class="cv-summary"></p>
+        </div>
+        <div class="cv-section">
+          <h3>Skills clave (peso)</h3>
+          <div id="cv-skills" class="skill-tags"></div>
+        </div>
+        <div class="cv-section">
+          <h3>Enlaces</h3>
+          <div class="links">
+            <a id="cv-linkedin" href="#" target="_blank" rel="noopener">LinkedIn</a>
+            <a id="cv-github" href="#" target="_blank" rel="noopener">GitHub</a>
+            <a id="cv-cv-pdf" href="https://avtovar.github.io/Curriculum-Vitae/Ali_Tovar_CV.pdf" target="_blank" rel="noopener">Ver CV PDF</a>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Columna derecha: ofertas -->
+      <section class="jobs-panel">
+        <!-- Selector de región -->
+        <div class="region-tabs">
+          <button class="region-tab active" data-region="argentina">🇦🇷 Argentina</button>
+          <button class="region-tab" data-region="europa">🇪🇺 Europa</button>
+          <button class="region-tab" data-region="eeuu">🇺🇸 Estados Unidos</button>
+        </div>
+
+        <!-- Barra de estado -->
+        <div id="status" class="status">Cargando ofertas…</div>
+
+        <!-- Lista de ofertas -->
+        <div id="job-list" class="job-list"></div>
+      </section>
+    </main>
+
+    <!-- ============ MODAL DETALLE ============ -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-content">
+        <button class="modal-close" id="modal-close" aria-label="Cerrar">&times;</button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- ============ MODAL CARTA ============ -->
+    <div id="letter-modal" class="modal hidden">
+      <div class="modal-content letter">
+        <button class="modal-close" id="letter-close" aria-label="Cerrar">&times;</button>
+        <div id="letter-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
