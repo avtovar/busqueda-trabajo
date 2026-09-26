@@ -8,8 +8,10 @@ export default function Toolbar({
   statusText,
   viewMode,
   onRefresh,
+  onLinkedInSearch,
   onToggleHistory,
   refreshing,
+  searchingLinkedIn,
   linkedinKeywords,
 }) {
   // ↑ Desestructuración completa de props en la firma: así no escribimos props.algo
@@ -33,6 +35,15 @@ export default function Toolbar({
             {refreshing ? '🔄 Actualizando…' : '🔄 Actualizar búsqueda'}
             {/* ↑ Ternario: cambia el texto del botón mientras el refresh está corriendo. */}
           </button>
+            <button
+              className="btn small secondary"
+              type="button"
+              onClick={onLinkedInSearch}
+              disabled={searchingLinkedIn}
+              title="Ejecuta una búsqueda manual en Apify, limitada a 50 resultados y con cobro por resultado."
+            >
+              {searchingLinkedIn ? 'Buscando en LinkedIn…' : 'Buscar con Apify · 50 máx.'}
+            </button>
           <button
             className={`btn small secondary${viewMode === 'history' ? ' active' : ''}`}
             // ↑ La clase 'active' solo se agrega cuando estás viendo el historial.
@@ -47,9 +58,9 @@ export default function Toolbar({
             href={linkedinSearchUrl(linkedinKeywords, region)}
             target="_blank"
             rel="noopener noreferrer"
-            title="Abrir esta búsqueda en LinkedIn (fuera del match automático)"
+            title="Buscar roles QA y skills de automatización del perfil, publicados durante los últimos 30 días"
           >
-            🔗 Buscar en LinkedIn
+            🔗 LinkedIn · QA y automatización · 30 días
           </a>
           {/* ↑ Es un <a>, no un <button>: porque navega a una URL generada con
               las keywords + la región actual (sin scrapear nada). */}

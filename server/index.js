@@ -6,6 +6,7 @@
 // ============================================================================
 
 // ↑ Módulo nativo de Node para crear el servidor con HTTP
+import 'dotenv/config';
 import { createServer } from 'node:http';
 // ↑ Lee archivos del disco (lo usa para servir el frontend compilado)
 import { readFile } from 'node:fs/promises';
@@ -26,13 +27,14 @@ import { DEMO_JOBS } from './demoData.js';
 // ↑ Ofertas cargadas a mano (mail/portal/LinkedIn) que siempre entran a la búsqueda
 import { CURATED_JOBS } from './curatedJobs.js';
 // ↑ Historial persistente: registra ofertas vistas y las devuelve por región
-import { recordSearch, getHistoryForRegion } from './history.js';
+import { recordSearch, getHistoryForRegion, expireOldJobs } from './history.js';
 // ↑ Directorio estático de consultoras QA (dato curado)
 import { CONSULTORAS } from './consultoras.js';
 // ↑ Tracker de contacto por consultora: lee y guarda el estado en disco
 import { loadStatus, setStatus, ESTADOS } from './consultorasStore.js';
 // ↑ Analítica de mercado: demanda, brechas y recomendaciones automáticas
 import { buildAnalytics } from './analytics.js';
+import { searchLinkedInWithApify } from './apifyLinkedin.js';
 
 // ↑ Resuelve la carpeta de este archivo para ubicar el resto de las rutas
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -116,7 +118,7 @@ async function getRanked(force = false) {
     // se incluyen en la búsqueda, exclusivas de la región Argentina.
     jobs = [...jobs, ...CURATED_JOBS];
     // ↑ Ranking maestro: calcula el match y agrupa las ofertas por región
-    let ranked = rankByRegion(jobs);
+    let ranked = await expireOldJobs(rankByRegion(jobs));
     // ↑ ¿Hubo al menos una oferta real en alguna región?
     const hasAny = Object.values(ranked).some((l) => l.length > 0);
     let online = true;
@@ -208,6 +210,20 @@ const server = createServer(async (req, res) => {
     // ↑ force=true obliga a volver a consultar las fuentes en este momento
     const data = await getRanked(true);
     return sendJSON(res, 200, { ok: true, _online: data._online, at: Date.now() });
+  }
+  if (url.pathname === '/api/linkedin-search' && req.method === 'POST') {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch {
+      return sendJSON(res, 400, { error: 'Solicitud JSON inválida.' });
+    }
+    try {
+      const data = await searchLinkedInWithApify(body.region || 'argentina');
+      return sendJSON(res, 200, data);
+    } catch (error) {
+      return sendJSON(res, error.statusCode || 502, { error: error.message || 'Falló la búsqueda de LinkedIn.' });
+    }
   }
   // ↑ Endpoint /api/history: devuelve las ofertas vistas de una región
   if (url.pathname === '/api/history') {

@@ -170,9 +170,9 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
             href={linkedinSearchUrl(`${job.title} ${job.company}`, region)}
             target="_blank"
             rel="noopener noreferrer"
-            title={langIsEn ? 'Search on LinkedIn (not scraped, opens LinkedIn directly)' : 'Buscar en LinkedIn (no se scrapea, abre LinkedIn directamente)'}
+            title={langIsEn ? 'Search LinkedIn jobs posted in the last 30 days' : 'Buscar en LinkedIn empleos publicados durante los últimos 30 días'}
           >
-            🔗 {langIsEn ? 'Search on LinkedIn' : 'Buscar en LinkedIn'}
+            🔗 {langIsEn ? 'LinkedIn · 30 days' : 'LinkedIn · 30 días'}
           </a>
         </div>
       </div>

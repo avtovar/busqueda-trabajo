@@ -4,6 +4,7 @@
 // ↑ De acá sale toda la data de la página "Propuesta de Interés" del frontend.
 // ↑ Trae el perfil de Ali (skills y marketSkills) para medir la demanda y las brechas
 import { PROFILE } from './cvProfile.js';
+import { computeMatch } from './matcher.js';
 
 // ↑ Nombres legibles de cada región para mostrar en los resultados
 const REGION_LABELS = {
@@ -58,6 +59,22 @@ function candidateSkills() {
     if (!map.has(key)) map.set(key, { name: key, has: true, aliases: [key] });
   }
   return [...map.values()];
+}
+
+function githubSkillEvidence() {
+  const projects = PROFILE.projects || [];
+  return (PROFILE.marketSkills || [])
+    .filter((skill) => !skill.has)
+    .map((skill) => ({
+      name: skill.name,
+      projects: projects
+        .filter((project) => {
+          const text = `${project.nombre} ${project.descripcion} ${project.lenguaje || ''}`;
+          return skill.aliases.some((alias) => textHasSkill(text, alias));
+        })
+        .map((project) => project.nombre),
+    }))
+    .filter((skill) => skill.projects.length);
 }
 
 // ↑ Genera la lista de recomendaciones automáticas (reglas de negocio con los cálculos)
@@ -191,6 +208,23 @@ export function buildAnalytics(regions) {
   const total = allJobs.length;
   const avgScore = total ? Math.round(sum / total) : 0;
 
+  const githubEvidence = githubSkillEvidence();
+  const evidenceNames = new Set(githubEvidence.map((skill) => skill.name));
+  const projectedProfile = {
+    ...PROFILE,
+    skills: {
+      ...PROFILE.skills,
+      ...Object.fromEntries([...evidenceNames].map((name) => [name, 0.5])),
+    },
+    marketSkills: (PROFILE.marketSkills || []).map((skill) => (
+      evidenceNames.has(skill.name) ? { ...skill, has: true } : skill
+    )),
+  };
+  const projectedScores = allJobs.map((job) => computeMatch(job, projectedProfile).score);
+  const projectedAvgScore = total
+    ? Math.round(projectedScores.reduce((score, next) => score + next, 0) / total)
+    : 0;
+
   // Demanda por skill en todo el mercado detectado
   // ↑ Para cada skill, cuenta en cuántas ofertas aparece (su demanda)
   const skills = candidateSkills();
@@ -241,10 +275,24 @@ export function buildAnalytics(regions) {
     candidato: {
       nombre: PROFILE.fullName,
       titulo: PROFILE.title,
+      headline: PROFILE.headline,
       experienciaAños: PROFILE.yearsExperience || 0,
       location: PROFILE.location,
+      summary: PROFILE.summary,
+      linkedin: PROFILE.linkedin,
       github: PROFILE.github,
+      skills: Object.entries(PROFILE.skills).map(([name, weight]) => ({ name, weight })),
+      skillCount: Object.keys(PROFILE.skills).length,
+      projectCount: (PROFILE.projects || []).length,
       proyectos: PROFILE.projects || [],
+    },
+    githubEvidence,
+    matchProjection: {
+      currentAvgScore: avgScore,
+      estimatedAvgScore: projectedAvgScore,
+      delta: projectedAvgScore - avgScore,
+      improvedJobs: projectedScores.filter((score, index) => score > (allJobs[index].score || 0)).length,
+      modeledSkills: [...evidenceNames],
     },
     total,
     avgScore,

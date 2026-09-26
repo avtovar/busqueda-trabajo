@@ -18,41 +18,41 @@
      Paleta v2: mismo esquema oscuro de antes pero más prolijo (fondos con menos
      "ruido" azul plano) y acentos más vivos (violeta/cian) para que los botones,
      links y degradados resalten más sobre el fondo. */
-  --bg: #0a0f1e;
+  --bg: #f3f6f4;
   /* ↑ Fondo principal de la página (azul-negro, más profundo que antes). */
-  --bg2: #141b2e;
+  --bg2: #ffffff;
   /* ↑ Fondo secundario: paneles, tarjetas y controles (un tono más claro que --bg). */
-  --panel: #161f36;
+  --panel: #ffffff;
   /* ↑ Color de los paneles/cards: un pelín más claro que bg2 para dar profundidad. */
-  --panel-hover: #1b2540;
+  --panel-hover: #f1f7f4;
   /* ↑ Fondo de panel/card al pasar el mouse (hover), sutilmente más claro. */
-  --border: #2a3557;
+  --border: #d8e2dd;
   /* ↑ Color de los bordes. Da "profundidad" a las cards sin usar shadow fuerte. */
-  --border-strong: #3d4b78;
+  --border-strong: #96aaa0;
   /* ↑ Borde más marcado para hover/focus, sin llegar al color de acento. */
-  --text: #eef2fb;
+  --text: #1c2925;
   /* ↑ Color del texto principal (casi blanco, suave para no cansar la vista). */
-  --muted: #9aa8c7;
+  --muted: #566760;
   /* ↑ Color del texto secundario: subtítulos, notas, descripciones tenues. */
-  --accent: #6c5ce7;
+  --accent: #17715c;
   /* ↑ Violeta "acento" de la app: botones primarios, links y degradados. Más vivo
      que el azul plano anterior. */
-  --accent2: #00c2ff;
+  --accent2: #dd714f;
   /* ↑ Segundo color del degradado (cian eléctrico). Juntos forman un gradiente
      violeta→cian bien saturado, mucho más vivo que el azul→índigo original. */
-  --accent-glow: rgba(108, 92, 231, 0.45);
+  --accent-glow: rgba(23, 113, 92, 0.18);
   /* ↑ Color del "brillo" (glow) que aparece al hacer hover sobre botones primarios. */
-  --green: #2dd4bf;
+  --green: #16825d;
   /* ↑ Verde-agua semántico: match alto, skills que tenés, badge activa. */
-  --yellow: #fbbf24;
+  --yellow: #a56212;
   /* ↑ Amarillo semántico: match medio, prioridad media. */
-  --red: #fb7185;
+  --red: #c14f59;
   /* ↑ Rojo/rosado semántico: match bajo, brechas de skills. */
-  --radius: 14px;
+  --radius: 10px;
   /* ↑ Radio de esquinas de cards, paneles y modales (redondeado suave). */
-  --radius-sm: 10px;
+  --radius-sm: 6px;
   /* ↑ Radio más chico para botones y controles pequeños. */
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow: 0 8px 22px rgba(24, 42, 34, 0.08);
   /* ↑ Sombra que flota las cards sobre el fondo oscuro. */
 }
 
@@ -63,7 +63,7 @@
 body {
   /* ↑ Estilo base de toda la página: fuente del sistema, fondo con degradado. */
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: radial-gradient(circle at 15% 0%, #1a1240 0%, transparent 45%), linear-gradient(160deg, var(--bg), #0d1224 60%);
+  background: var(--page-background);
   /* ↑ Fondo con un degradado radial violeta sutil arriba a la izquierda, sobre
      el degradado lineal base. Da más profundidad que un simple gradiente plano. */
   color: var(--text);
@@ -75,7 +75,7 @@ body {
 .app { max-width: 1200px; margin: 0 auto; padding: 16px; }
 
 /* ----- Header ----- */
-.header-inner { padding: 18px 4px 10px; }
+.header-inner { padding: 18px 4px 10px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .header-inner h1 {
   /* ↑ Título con "texto degradado": el color sale del gradient, no de un color fijo. */
   font-size: 1.9rem; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -83,6 +83,9 @@ body {
      se vuelve transparente. Es un truco clásico de CSS. */
 }
 .subtitle { color: var(--muted); margin-top: 4px; }
+.theme-toggle { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; cursor: pointer; font: inherit; font-size: 0.85rem; }
+.theme-toggle:hover { border-color: var(--accent); }
+.theme-toggle:focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }
 
 /* ----- Layout principal: CV a la izquierda, ofertas a la derecha ----- */
 .layout { display: grid; grid-template-columns: 320px 1fr; gap: 18px; margin-top: 10px; }
@@ -160,7 +163,7 @@ body {
 .cat-multi { background: rgba(245, 158, 11, 0.18); color: #b45309; border-color: rgba(245, 158, 11, 0.4); }
 .cat-staffing { background: rgba(236, 72, 153, 0.15); color: #db2777; border-color: rgba(236, 72, 153, 0.35); }
 .cat-fintech { background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.35); }
-.cat-gov { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
+.cat-gov { background: rgba(139, 92, 246, 0.15); color: var(--gov-color); border-color: rgba(139, 92, 246, 0.35); }
 
 .consultora-card .job-top { justify-content: flex-start; gap: 12px; }
 .consultora-logo {
@@ -184,11 +187,17 @@ body {
 
 /* ----- Lista de ofertas ----- */
 .job-list { display: flex; flex-direction: column; gap: 12px; }
+.job-list-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; }
+.job-sort-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.82rem; }
+.job-sort-select { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); color: var(--text); font: inherit; }
 .job-card {
-  /* ↑ Card clicable de cada oferta: al hover se eleva y cambia su borde. */
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; cursor: pointer; transition: transform 0.12s, border-color 0.12s; box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; transition: transform 0.12s, border-color 0.12s; box-shadow: var(--shadow);
 }
-.job-card:hover { transform: translateY(-2px); border-color: var(--accent2); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--accent-glow); }
+.job-card:hover { transform: translateY(-2px); border-color: var(--accent2); box-shadow: var(--hover-shadow), 0 0 0 1px var(--accent-glow); }
+.job-open { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.job-open:focus-visible, .job-dismiss:focus-visible, .job-sort-select:focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }
+.job-dismiss { display: block; margin: 10px 0 0 auto; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: 0.74rem; cursor: pointer; }
+.job-dismiss:hover { border-color: var(--red); color: var(--red); }
 /* ↑ Además de levantarse, ahora el borde se pinta cian y aparece un aro de glow
    violeta sutil, en línea con el resto de los elementos interactivos. */
 .job-card .job-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -293,6 +302,24 @@ body {
 .kpi-label { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
 .kpi-sub { font-size: 0.72rem; color: var(--muted); opacity: 0.85; }
 
+.source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.source-card { min-width: 0; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.source-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.source-heading h4 { font-size: 0.95rem; }
+.source-status { color: var(--muted); font-size: 0.72rem; text-align: right; }
+.source-title { font-size: 0.85rem; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.source-detail, .source-summary, .source-note { color: var(--muted); font-size: 0.78rem; line-height: 1.5; margin-top: 7px; }
+.source-link { display: inline-block; margin-top: 10px; color: var(--accent); font-size: 0.82rem; text-decoration: none; }
+.source-link:hover { text-decoration: underline; }
+.source-more { margin-top: 10px; }
+.source-more summary { color: var(--accent); cursor: pointer; font-size: 0.78rem; }
+.source-more .skill-tags { margin-top: 8px; }
+.github-evidence { display: flex; flex-direction: column; }
+.evidence-row { display: grid; grid-template-columns: minmax(110px, 0.35fr) 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.evidence-projects { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.evidence-projects a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.evidence-projects a:hover { text-decoration: underline; }
+
 /* Cada sección del análisis separada por borde superior, modo "documento". */
 .analisis-section { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 .analisis-section h3 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 8px; }
@@ -313,7 +340,7 @@ body {
 
 /* Chips de brechas (rojos) y de fortalezas (verdes). */
 .gap-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.gap-chip { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.45); color: #fca5a5; border-radius: 20px; padding: 4px 11px; font-size: 0.8rem; }
+.gap-chip { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.45); color: var(--gap-color); border-radius: 20px; padding: 4px 11px; font-size: 0.8rem; }
 .strengths { display: flex; flex-wrap: wrap; gap: 8px; }
 .strong-chip { background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.4); color: var(--green); border-radius: 20px; padding: 4px 11px; font-size: 0.8rem; }
 
@@ -346,4 +373,39 @@ body {
   .layout { grid-template-columns: 1fr; }
   .cv-panel { order: 2; }
   .jobs-panel { order: 1; }
+}
+
+@media (max-width: 480px) {
+  .evidence-row { grid-template-columns: 1fr; }
+}
+
+:root {
+  color-scheme: light;
+  --page-background: radial-gradient(circle at 8% 0%, #e2f0ea 0%, transparent 42%), linear-gradient(160deg, #f7f9f7, #edf2ef 60%);
+  --hover-shadow: 0 10px 24px rgba(24, 42, 34, 0.12);
+  --gap-color: #a63f48;
+  --gov-color: #654593;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0a0f1e;
+  --bg2: #141b2e;
+  --panel: #161f36;
+  --panel-hover: #1b2540;
+  --border: #2a3557;
+  --border-strong: #3d4b78;
+  --text: #eef2fb;
+  --muted: #9aa8c7;
+  --accent: #8b7bff;
+  --accent2: #00c2ff;
+  --accent-glow: rgba(108, 92, 231, 0.35);
+  --green: #2dd4bf;
+  --yellow: #fbbf24;
+  --red: #fb7185;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --page-background: radial-gradient(circle at 15% 0%, #1a1240 0%, transparent 45%), linear-gradient(160deg, #0a0f1e, #0d1224 60%);
+  --hover-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --gap-color: #fca5a5;
+  --gov-color: #a78bfa;
 }

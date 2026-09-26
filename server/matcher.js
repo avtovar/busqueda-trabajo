@@ -53,14 +53,14 @@ function roleHits(job) {
 //  - requested: habilidades que la vacante pide (skills del perfil + mercado)
 //  - missed:    habilidades pedidas por la vacante que el candidato NO posee
 // ↑ Calcula el porcentaje de compatibilidad de una oferta con el perfil (0-100)
-export function computeMatch(job) {
+export function computeMatch(job, candidateProfile = PROFILE) {
   const text = jobText(job);
   const title = job.title.toLowerCase();
 
   // Skills del perfil que la oferta pide y que tenemos (matched)
   // ↑ Busca cuáles skills del CV aparecen en el texto de la oferta
   const matched = [];
-  for (const [skill, weight] of Object.entries(PROFILE.skills)) {
+  for (const [skill, weight] of Object.entries(candidateProfile.skills)) {
     if (textHasSkill(text, skill)) {
       // ↑ inTitle marca si el skill también aparece en el título (vale más)
       matched.push({ skill, weight, inTitle: textHasSkill(title, skill) });
@@ -73,7 +73,7 @@ export function computeMatch(job) {
   // ↑ Detecta skills del mercado pedidos por la oferta; si Ali no los tiene => brecha
   const requestedMarket = [];
   const missing = [];
-  for (const ms of PROFILE.marketSkills || []) {
+  for (const ms of candidateProfile.marketSkills || []) {
     const present = ms.aliases.some((a) => textHasSkill(text, a));
     if (!present) continue;
     requestedMarket.push(ms.name);
@@ -104,7 +104,7 @@ export function computeMatch(job) {
 
   // "requested": unión de skills del perfil pedidos + skills del mercado pedidos
   // ↑ Habilidades que la oferta está pidiendo (del perfil y del mercado)
-  const requestedPerfil = Object.keys(PROFILE.skills).filter((s) => textHasSkill(text, s));
+  const requestedPerfil = Object.keys(candidateProfile.skills).filter((s) => textHasSkill(text, s));
   const requested = [...new Set([...requestedPerfil, ...requestedMarket])];
 
   // Puntaje (dirigido por la oferta)

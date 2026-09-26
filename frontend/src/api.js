@@ -75,6 +75,23 @@ export async function refreshJobs() {
   } catch {}
 }
 
+export async function searchLinkedInJobs(region) {
+  let response;
+  try {
+    response = await fetch('/api/linkedin-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region }),
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el backend local.');
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `La búsqueda falló (HTTP ${response.status}).`);
+  return data;
+}
+
 // Trae el detalle enriquecido de una oferta (/api/job?q=ID) con resumen de empresa y skills.
 export async function loadJobDetail(id) {
   try {

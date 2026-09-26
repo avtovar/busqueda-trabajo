@@ -27,15 +27,25 @@ import JobDetailModal from './components/JobDetailModal.jsx';
 import LetterModal from './components/LetterModal.jsx';
 // ↑ Modal que muestra la carta de presentación generada y la deja copiar/descargar.
 
+import { linkedinProfileKeywords } from './utils.js';
+
 import {
   loadProfile, loadJobs, loadHistory, refreshJobs,
-  loadJobDetail, loadCoverLetter, loadConsultoras, loadAnalytics,
+  loadJobDetail, loadCoverLetter, loadConsultoras, loadAnalytics, searchLinkedInJobs,
 } from './api.js';
 // ↑ Importamos las funciones de la capa de API. Cada una hace un fetch al backend
 //   y, si falla, devuelve datos de respaldo para que la UI nunca quede vacía.
 
 // Estados posibles de contacto de una consultora. Se usan como opciones del tracker.
 const DEFAULT_ESTADOS = ['Sin contactar', 'Contactado', 'Respondió', 'Entrevista agendada', 'Descartada'];
+
+function getSavedTheme() {
+  try {
+    return localStorage.getItem('buscaempleo-theme') === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
 
 export default function App() {
   // ↑ Este es el componente padre: acá vive casi todo el estado global de la app y
@@ -72,12 +82,24 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   // ↑ Bandera del botón "Actualizar búsqueda": se pone en true mientras el refetch corre.
 
+  const [searchingLinkedIn, setSearchingLinkedIn] = useState(false);
+  const [linkedinSearchError, setLinkedInSearchError] = useState('');
+
   const [selectedJob, setSelectedJob] = useState(null); // { job, summary, region }
   // ↑ Oferta seleccionada para abrir el modal de detalle. null = modal cerrado.
   //   Cuando hay valor, guarda la oferta, su resumen y la región de la que vino.
 
   const [letter, setLetter] = useState(null);
   // ↑ Carta de presentación generada. null = modal de carta cerrado.
+
+  const [theme, setTheme] = useState(getSavedTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('buscaempleo-theme', theme);
+    } catch {}
+  }, [theme]);
 
   // Al montar el componente (corre UNA sola vez porque el array de dependencias está vacío),
   // traemos el perfil y las ofertas de Argentina en paralelo con Promise.all.
@@ -142,6 +164,20 @@ export default function App() {
     setRefreshing(false);
   }
 
+  async function handleLinkedInSearch() {
+    setSearchingLinkedIn(true);
+    setLinkedInSearchError('');
+    try {
+      const data = await searchLinkedInJobs(region);
+      setJobsData(data);
+      setViewMode('live');
+    } catch (error) {
+      setLinkedInSearchError(error.message || 'No se pudo buscar en LinkedIn.');
+    } finally {
+      setSearchingLinkedIn(false);
+    }
+  }
+
   // Alterna entre vista live y historial, y recarga los datos que correspondan.
   async function handleToggleHistory() {
     const next = viewMode === 'history' ? 'live' : 'history';
@@ -201,16 +237,21 @@ export default function App() {
       return loading ? 'Calculando la propuesta de interés…' : 'Mercado QA relevado en todas las regiones, comparado contra tu CV.';
     }
     if (loading) return 'Cargando…';
+    if (searchingLinkedIn) return 'Consultando LinkedIn con Apify (máximo 50 resultados)…';
+    if (linkedinSearchError) return `Búsqueda de LinkedIn: ${linkedinSearchError}`;
+    if (jobsData.source === 'LinkedIn / Apify') {
+      return `${jobsData.jobs.length} ofertas de LinkedIn, filtradas a los últimos 30 días.`;
+    }
     if (viewMode === 'history') {
-      return `Mostrando ofertas activas y vistas desde enero 2026 (${(jobsData.jobs || []).length}).`;
+      return `Historial desde 01/01/2026 · ${(jobsData.jobs || []).length} ofertas · sin vencimiento por días. “No aparece” no confirma cobertura.`;
     }
     return jobsData._online
       ? 'Conexión exitosa con las fuentes de empleo.'
       : 'Modo demo: no se pudo contactar las fuentes en línea. Mostrando ofertas de ejemplo.';
   }
 
-  // Las keywords que se van a usar para buscar en LinkedIn (título o headline del perfil).
-  const linkedinKeywords = (profile && (profile.title || profile.headline)) || 'QA Engineer';
+  const linkedinKeywords = linkedinProfileKeywords(profile);
+  const outreachKeywords = (profile && (profile.title || profile.headline)) || 'QA Engineer';
 
   return (
     <div className="app">
@@ -218,8 +259,18 @@ export default function App() {
 
       <header className="app-header">
         <div className="header-inner">
-          <h1>🎯 BuscaEmpleo</h1>
-          <p className="subtitle">Las mejores ofertas para <strong>Ali Tovar</strong> · QA Engineer</p>
+          <div className="brand-copy">
+            <h1>🎯 BuscaEmpleo</h1>
+            <p className="subtitle">Las mejores ofertas para <strong>Ali Tovar</strong> · QA Engineer</p>
+          </div>
+          <button
+            className="theme-toggle"
+            type="button"
+            aria-pressed={theme === 'dark'}
+            onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+          >
+            {theme === 'dark' ? '☀️ Modo claro' : '🌙 Modo oscuro'}
+          </button>
         </div>
       </header>
 
@@ -238,7 +289,9 @@ export default function App() {
             statusText={statusText()}
             viewMode={viewMode}
             refreshing={refreshing}
+            searchingLinkedIn={searchingLinkedIn}
             onRefresh={handleRefresh}
+            onLinkedInSearch={handleLinkedInSearch}
             onToggleHistory={handleToggleHistory}
             linkedinKeywords={linkedinKeywords}
           />
@@ -248,7 +301,7 @@ export default function App() {
           {/* Render condicional: la sección derecha muestra un componente u otro
               según la región elegida (ofertas, consultoras o análisis). */}
           {region === 'consultoras' ? (
-            <ConsultorasList consultoras={consultoras} estados={estados} onChange={handleConsultoraChange} keywords={linkedinKeywords} />
+            <ConsultorasList consultoras={consultoras} estados={estados} onChange={handleConsultoraChange} keywords={outreachKeywords} />
             // ↑ Sección Consultoras QA: pasa el listado, los estados y el callback de cambio.
           ) : region === 'analisis' ? (
             <AnalysisPage

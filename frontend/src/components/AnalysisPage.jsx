@@ -45,6 +45,12 @@ export default function AnalysisPage({ data, profile, viewMode, refreshing, onRe
   const byRegion = data.byRegion || [];
   const recs = data.recommendations || [];
   const candidato = data.candidato || {};
+  const profileSkills = Object.entries(profile?.skills || {});
+  const projects = candidato.proyectos || [];
+  const githubEvidence = data.githubEvidence || [];
+  const projection = data.matchProjection;
+  const projectByName = new Map(projects.map((project) => [project.nombre, project]));
+  const githubLanguages = [...new Set(projects.map((project) => project.lenguaje).filter(Boolean))];
 
   // El % más alto de demanda: sirve para escalar el ancho de todas las barras.
   const maxPct = Math.max(1, ...skillStats.map((s) => s.pct));
@@ -92,9 +98,9 @@ export default function AnalysisPage({ data, profile, viewMode, refreshing, onRe
             href={linkedinSearchUrl(linkedinKeywords, profile?.region || 'argentina')}
             target="_blank"
             rel="noopener noreferrer"
-            title="Abrir esta búsqueda en LinkedIn (fuera del match automático)"
+            title="Buscar roles QA y skills de automatización del perfil, publicados durante los últimos 30 días"
           >
-            🔗 Buscar en LinkedIn
+            🔗 LinkedIn · QA y automatización · 30 días
           </a>
           {/* ↑ Es un <a>, no un <button>: porque navega a una URL generada con
               las keywords del perfil (sin scrapear nada). */}
@@ -110,7 +116,86 @@ export default function AnalysisPage({ data, profile, viewMode, refreshing, onRe
           // ↑ Este KPI extra solo aparece si hay al menos un skill en el ranking.
           <Kpi value={topDemand.pct + '%'} label="Skill más pedido" sub={topDemand.name} />
         )}
+        {projection && (
+          <Kpi
+            value={`${projection.estimatedAvgScore}%`}
+            label="Match potencial"
+            sub={`${projection.delta > 0 ? '+' : ''}${projection.delta} pp vs. el actual · skills de GitHub a verificar`}
+          />
+        )}
       </div>
+
+      <section className="analisis-section source-section">
+        <h3>Tu perfil por fuente</h3>
+        <div className="source-grid">
+          <article className="source-card">
+            <div className="source-heading">
+              <h4>CV</h4>
+              <span className="source-status">{candidato.skillCount || profileSkills.length} skills</span>
+            </div>
+            <p className="source-title">{candidato.headline || profile?.headline || candidato.titulo}</p>
+            <p className="source-detail">{candidato.experienciaAños || profile?.yearsExperience || 0} años · {candidato.location || profile?.location}</p>
+            <p className="source-summary">{candidato.summary || profile?.summary}</p>
+            <details className="source-more">
+              <summary>Ver las {profileSkills.length} skills registradas</summary>
+              <div className="skill-tags">
+                {profileSkills.map(([name, weight]) => (
+                  <span className="tag" key={name}>{name} ({Math.round(weight * 100)}%)</span>
+                ))}
+              </div>
+            </details>
+          </article>
+
+          <article className="source-card">
+            <div className="source-heading">
+              <h4>LinkedIn</h4>
+              <span className="source-status">Enlace configurado</span>
+            </div>
+            <p className="source-detail">Titular guardado en el perfil del CV</p>
+            <p className="source-title">{candidato.headline || profile?.headline || candidato.titulo}</p>
+            {candidato.linkedin && (
+              <a className="source-link" href={candidato.linkedin} target="_blank" rel="noopener noreferrer">Abrir perfil de LinkedIn ↗</a>
+            )}
+            <p className="source-note">No se importan datos directamente desde LinkedIn.</p>
+          </article>
+
+          <article className="source-card">
+            <div className="source-heading">
+              <h4>GitHub</h4>
+              <span className="source-status">{projects.length} proyectos registrados</span>
+            </div>
+            <p className="source-title">{githubLanguages.join(' · ') || 'Sin lenguajes registrados'}</p>
+            <p className="source-detail">Portfolio configurado para contrastar evidencia con skills del CV.</p>
+            {candidato.github && (
+              <a className="source-link" href={candidato.github} target="_blank" rel="noopener noreferrer">Abrir perfil de GitHub ↗</a>
+            )}
+          </article>
+        </div>
+      </section>
+
+      <section className="analisis-section">
+        <h3>Skills detectadas en GitHub que no figuran en el CV</h3>
+        <p className="analisis-note">Estimación orientativa: se simula un peso inicial del 50% para estas skills; la evidencia del repositorio no confirma por sí sola experiencia profesional.</p>
+        {githubEvidence.length ? (
+          <div className="github-evidence">
+            {githubEvidence.map((skill) => (
+              <div className="evidence-row" key={skill.name}>
+                <strong>{skill.name}</strong>
+                <div className="evidence-projects">
+                  {skill.projects.map((projectName) => {
+                    const project = projectByName.get(projectName);
+                    return project ? (
+                      <a key={projectName} href={project.url} target="_blank" rel="noopener noreferrer">{projectName}</a>
+                    ) : <span key={projectName}>{projectName}</span>;
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="analisis-note">Los proyectos registrados no muestran skills adicionales del listado de mercado.</p>
+        )}
+      </section>
 
       {/* Gráfico de demanda vs CV */}
       <section className="analisis-section">

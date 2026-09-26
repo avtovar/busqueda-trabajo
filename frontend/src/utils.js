@@ -17,6 +17,20 @@ export function daysAgo(ts) {
   return Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
 }
 
+export function formatDisplayDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const numeric = Number(raw);
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : /^\d{10,13}$/.test(raw)
+      ? new Date(numeric < 1e12 ? numeric * 1000 : numeric)
+      : new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+}
+
 // LinkedIn no tiene API pública de empleos (solo para partners aprobados) y
 // scrapearlo viola sus términos de uso. En vez de traer resultados
 // automáticos, armamos un link directo a la búsqueda ya filtrada para que
@@ -33,9 +47,32 @@ export const REGION_LOCATION = {
   chile: 'Chile',
 };
 
-// Arma la URL de búsqueda de LinkedIn (sin scrapear nada) con las keywords y la región.
+export function linkedinProfileKeywords(profile) {
+  const roleTerms = Array.isArray(profile?.keywords) ? profile.keywords : [];
+  const skillTerms = Object.entries(profile?.skills || {})
+    .filter(([name, weight]) => Number(weight) >= 0.9 && /(qa|quality|test|automation)/i.test(name))
+    .map(([name]) => name);
+  const uniqueTerms = new Map();
+
+  for (const term of [...roleTerms, ...skillTerms]) {
+    if (typeof term !== 'string' || !term.trim() || /^sdft$/i.test(term.trim())) continue;
+    const normalized = term.trim().toLowerCase();
+    if (!uniqueTerms.has(normalized)) uniqueTerms.set(normalized, term.trim());
+  }
+
+  const terms = [...uniqueTerms.values()].map((term) => (
+    /\s/.test(term) ? `"${term}"` : term
+  ));
+  return terms.length ? `(${terms.join(' OR ')})` : '"QA Engineer" OR automation';
+}
+
+// Arma una búsqueda directa de LinkedIn, limitada a publicaciones de los últimos 30 días.
 export function linkedinSearchUrl(keywords, region) {
-  const params = new URLSearchParams({ keywords, location: REGION_LOCATION[region] || '' });
+  const params = new URLSearchParams({
+    keywords,
+    location: REGION_LOCATION[region] || '',
+    f_TPR: `r${30 * 24 * 60 * 60}`,
+  });
   // ↑ URLSearchParams codifica los parámetros de forma segura (espacios, tildes, etc.).
   return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
 }

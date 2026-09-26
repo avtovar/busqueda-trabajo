@@ -17,8 +17,27 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 // ↑ Ruta completa del archivo JSON del historial
 const DATA_FILE = join(DATA_DIR, 'history.json');
-// Conserva el historial desde el 1 de enero de 2026 (en vez de una ventana móvil).
-const CUTOFF_MS = Date.parse('2026-01-01T00:00:00-03:00');
+const RETENTION_MONTHS = 6;
+
+function retentionCutoff(now = Date.now()) {
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - RETENTION_MONTHS);
+  return cutoff.getTime();
+}
+
+function publicationTime(job) {
+  const raw = job?.date ?? job?.postedAtTimestamp ?? job?.postedAt;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const numeric = Number(raw);
+  const timestamp = /^\d{10,13}$/.test(String(raw))
+    ? (numeric < 1e12 ? numeric * 1000 : numeric)
+    : new Date(raw).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function effectiveStart(job, firstSeen, now) {
+  return publicationTime(job) ?? firstSeen ?? now;
+}
 
 // ↑ Crea la carpeta data/ si no existe (recursive evita errores si ya está)
 async function ensureDir() {
@@ -78,11 +97,10 @@ export async function recordSearch(rankedByRegion) {
     }
   }
 
-  const cutoff = CUTOFF_MS;
-  // ↑ Purga: elimina entradas que no se vieron después del 1 de enero de 2026
+  const cutoff = retentionCutoff(now);
+  // Purga ofertas publicadas o vistas por primera vez hace más de seis meses.
   for (const [key, entry] of Object.entries(history.entries)) {
-    // ↑ Si pasó demasiado tiempo sin verse, esa oferta sale del historial
-    if (entry.lastSeen < cutoff) delete history.entries[key];
+    if (effectiveStart(entry.job, entry.firstSeen, now) < cutoff) delete history.entries[key];
   }
 
   // ↑ Marca la hora de esta corrida: sirve para saber qué quedó "activo"
@@ -91,15 +109,54 @@ export async function recordSearch(rankedByRegion) {
   return history;
 }
 
+export async function expireOldJobs(rankedByRegion) {
+  const history = await load();
+  const now = Date.now();
+  const cutoff = retentionCutoff(now);
+  let changed = false;
+  const filtered = {};
+
+  for (const [region, jobs] of Object.entries(rankedByRegion)) {
+    filtered[region] = jobs.filter((job) => {
+      const key = keyOf(job);
+      const entry = history.entries[key];
+      const keep = effectiveStart(job, entry?.firstSeen, now) >= cutoff;
+      if (!keep && entry) {
+        delete history.entries[key];
+        changed = true;
+      }
+      return keep;
+    });
+  }
+
+  for (const [key, entry] of Object.entries(history.entries)) {
+    if (effectiveStart(entry.job, entry.firstSeen, now) < cutoff) {
+      delete history.entries[key];
+      changed = true;
+    }
+  }
+
+  if (changed) await save(history);
+  return filtered;
+}
+
 // Devuelve las ofertas registradas desde el 1 de enero de 2026 para una región,
 // marcando cuáles siguen "activas" (aparecieron en la última búsqueda) y cuáles no.
 // ↑ Devuelve las ofertas vistas de una región, marcando cuáles siguen activas
 export async function getHistoryForRegion(region) {
   const history = await load();
-  const cutoff = CUTOFF_MS;
+  const cutoff = retentionCutoff();
+  let changed = false;
+  for (const [key, entry] of Object.entries(history.entries)) {
+    if (effectiveStart(entry.job, entry.firstSeen, Date.now()) < cutoff) {
+      delete history.entries[key];
+      changed = true;
+    }
+  }
+  if (changed) await save(history);
   // ↑ Filtra por región y dentro de la ventana de tiempo permitida
   return Object.values(history.entries)
-    .filter((e) => e.region === region && e.lastSeen >= cutoff)
+    .filter((e) => e.region === region && effectiveStart(e.job, e.firstSeen, Date.now()) >= cutoff)
     .map((e) => ({
       ...e.job,
       // ↑ "Activa" = apareció en la ÚLTIMA búsqueda (lastSeen == lastRun)
