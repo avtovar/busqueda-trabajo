@@ -8,7 +8,27 @@
 // práctica de QA (manual & automation) en Argentina. Es un directorio de
 // referencia para outreach, no un feed en vivo: no se scrapea ninguna fuente,
 // las URLs son las que se verificaron al armar el listado.
+// ↑ Catálogo curado y estático de ~100 empresas donde hay trabajo de QA:
+// ↑ consultoras, software factories, bancos, fintechs, agencias de staffing
+// ↑ y organismos del sector público. Incluye un bloque de gobierno porque muchas
+// ↑ vacantes de testing se piden por concurso y no salen en los portales privados.
+// ↑ Para qué sirve: es un DIRECTORIO de referencia para hacer outreach (buscar,
+// ↑ cold-mail o contactarse), NO un feed de ofertas. No se scrapea nada: cada
+// ↑ link y cada nota se verificaron a mano al armar el listado.
+// ↑ Es el dato que sirve el endpoint /api/consultoras, junto con el estado de
+// ↑ contacto que se guarda aparte en consultorasStore.js.
 export const CONSULTORAS = [
+  // ↓ CADA LÍNEA ES UNA EMPRESA, con estas 6 llaves:
+  // ↓   id       → clave única y estable. No se cambia nunca, porque es con la que
+  // ↓              se guarda el estado de contacto en data/consultoras-status.json.
+  // ↓   name     → el nombre de la empresa como lo muestra la interfaz.
+  // ↓   category → la familia a la que pertenece. Es el FILTRO que dibuja el
+  // ↓              frontend con un Set de todas las categorías que encuentra.
+  // ↓   city     → dónde está o desde dónde opera (texto libre: 'CABA',
+  // ↓              'Córdoba / Buenos Aires', 'Remoto AR'...).
+  // ↓   note     → una línea con el dato útil: a qué se dedica, si tiene vacante
+  // ↓              o a qué mail escribir. Puede ir vacía ('').
+  // ↓   link     → la URL de su web o del perfil donde se encontró la info.
   { id: 'vates', name: 'Vates', category: 'Especializada en QA', city: 'Buenos Aires', note: 'Más de 30 años en testing, QA automation y certificación de software crítico', link: 'https://www.vates.com' },
   { id: 'a1qa', name: 'a1qa (Argentina)', category: 'Especializada en QA', city: 'CABA', note: 'QA para fintech, banca, telecom y gaming', link: 'https://a1qa.ar/' },
   { id: 'qualis-lab', name: 'Qualis Lab', category: 'Especializada en QA', city: 'CABA', note: 'Automation, stress test, mobile testing, UX/vulnerability testing', link: 'https://www.qualis-lab.com/' },
@@ -22,6 +42,9 @@ export const CONSULTORAS = [
   { id: 'qalified', name: 'QAlified', category: 'Especializada en QA', city: 'Uruguay (con proyectos AR)', note: 'Testing de software, muy bien rankeada', link: 'https://clutch.co/profile/qalified-0' },
   { id: 'betterqa', name: 'BetterQA', category: 'Especializada en QA', city: 'Internacional (atiende AR)', note: 'App testing y QA end-to-end', link: 'https://clutch.co/profile/betterqa' },
 
+  // ↑ FIN del grupo "Especializada en QA": son empresas cuyo negocio ES testing.
+  // ↑ Arranca el grupo "Consultora IT con área QA": hacen de todo (desarrollo,
+  // ↑ datos, cloud) y el testing es una parte más de su portfolio.
   { id: 'baufest', name: 'Baufest', category: 'Consultora IT con área QA', city: 'Buenos Aires', note: 'QA junto a DevOps y ciberseguridad', link: 'https://developargentina.com/directorio/baufest' },
   { id: 'santex', name: 'Santex', category: 'Consultora IT con área QA', city: 'Córdoba / Buenos Aires', note: 'Desarrollo + QA, +26 años de trayectoria', link: 'https://developargentina.com/directorio/santex' },
   { id: 'snoop-consulting', name: 'Snoop Consulting', category: 'Consultora IT con área QA', city: 'Buenos Aires', note: 'Mobile, QA; clientes como Mercado Libre y Hospital Italiano', link: 'https://developargentina.com/directorio/snoop-consulting' },
@@ -44,6 +67,8 @@ export const CONSULTORAS = [
   { id: 'intive', name: 'intive (ex Hexacta/Belatrix)', category: 'Consultora IT con área QA', city: 'Buenos Aires', note: 'QA como parte de su oferta de ingeniería', link: 'https://intive.com' },
   { id: 'nanlabs', name: 'NaNLABS', category: 'Consultora IT con área QA', city: 'La Plata', note: 'Boutique técnica, cloud/data con QA', link: 'https://www.nanlabs.com' },
 
+  // ↑ Arranca el grupo "Multinacional con oficina AR": empresas grandes con
+  // ↑ sucursal en Argentina. Suelen tener equipos de QA grandes y bien Paying.
   { id: 'globant', name: 'Globant', category: 'Multinacional con oficina AR', city: 'Buenos Aires', note: 'QA/testing como parte de su ingeniería digital', link: 'https://www.globant.com' },
   { id: 'accenture-ar', name: 'Accenture Argentina', category: 'Multinacional con oficina AR', city: 'Buenos Aires', note: 'Incluye Wolox (ex startup argentina adquirida)', link: 'https://www.accenture.com/ar-es' },
   { id: 'ibm-ar', name: 'IBM Argentina', category: 'Multinacional con oficina AR', city: 'Buenos Aires', note: 'Consultoría + QA en proyectos grandes', link: 'https://www.ibm.com/ar-es' },
@@ -57,6 +82,9 @@ export const CONSULTORAS = [
   { id: 'neoris-epam', name: 'Neoris / EPAM Argentina', category: 'Multinacional con oficina AR', city: 'Santa Fe', note: 'Neoris se integró a EPAM en 2024', link: 'https://www.epam.com' },
   { id: 'dxc-ar', name: 'DXC Technology Argentina', category: 'Multinacional con oficina AR', city: 'Buenos Aires', note: '', link: 'https://www.dxc.com' },
 
+  // ↑ Arranca el grupo "Staffing / recruiting IT": estas no contratan testers de
+  // ↑ planta, sino que hacen de puente entre la empresa y el tester. Son las que
+  // ↑ más vacantes concretas tienen, por eso varias traen el mail en el `note`.
   { id: 'randstad-tech', name: 'Randstad Technologies Argentina', category: 'Staffing / recruiting IT', city: 'CABA', note: 'División IT dedicada, incluye QA', link: 'https://www.randstad.com.ar/empresas/areas-de-expertise/it/' },
   { id: 'adecco-ar', name: 'Grupo Adecco Argentina (IT)', category: 'Staffing / recruiting IT', city: 'Buenos Aires', note: '', link: 'https://www.adecco.com.ar' },
   { id: 'manpower-ar', name: 'ManpowerGroup / Experis Argentina', category: 'Staffing / recruiting IT', city: 'Buenos Aires', note: '', link: 'https://ar.manpowergroup.com' },
@@ -66,6 +94,10 @@ export const CONSULTORAS = [
   { id: 'contraluz', name: 'Consultora Contraluz', category: 'Staffing / recruiting IT', city: 'CABA', note: 'Búsqueda y selección de personal IT; búsquedas QA en USD (rrhh@consultoracontraluz.com.ar)', link: 'https://www.consultoracontraluz.com.ar' },
 
   // ---- Ampliación a 100 consultoras ----
+  // ↑ Segundo tanda del listado: empresas que se fueron sumando con el tiempo.
+  // ↑ Ojo con el patrón: pueden intercalarse en cualquier grupo según su `category`
+  // ↑ (acá hay especializadas, consultoras IT, multinacionales y bancos juntos),
+  // ↑ porque lo que agrupa de verdad al mostrarlas es el filtro, no el orden.
   { id: 'lemonit', name: 'LemonIT', category: 'Especializada en QA', city: 'Buenos Aires', note: 'QA y testing como servicio dedicado', link: 'https://clutch.co/profile/lemonit' },
   { id: 'weareleaps', name: 'Leaps', category: 'Consultora IT con área QA', city: 'CABA', note: 'Nearshore IT para USA con práctica QA', link: 'https://clutch.co/profile/leaps' },
   { id: 'binary-studio', name: 'Binary Studio', category: 'Consultora IT con área QA', city: 'Remoto AR', note: 'Dev + QA, modelo remoto con clientes globales', link: 'https://binary-studio.com' },
@@ -104,6 +136,9 @@ export const CONSULTORAS = [
   { id: 'tsoft-ar', name: 'TSoft Argentina', category: 'Consultora IT con área QA', city: 'Buenos Aires', note: 'Consultora de servicios de TI con área de testing. Vacantes: QA Analyst Senior (arquitecturas distribuidas, AWS, Jira/Xray) y Especialista QA Senior (BDD/TDD, Cypress/Tosca, ISTQB excluyente)', link: 'https://www.tsoftglobal.com' },
 
   // ---- Bancos y billeteras (equipos de QA propios) ----
+  // ↑ Grupo "Banco / Fintech / Billetera": no son consultoras, pero contratan QA
+  // ↑ directo y muchas veces con equipos de testing grandes. El `note` cuenta de
+  // ↑ qué producto se testea (banca digital, pagos, billetera cripto).
   { id: 'banco-nacion', name: 'Banco de la Nación Argentina', category: 'Banco / Fintech / Billetera', city: 'CABA', note: 'Banca pública con equipos de TI y aseguramiento de calidad', link: 'https://www.bna.com.ar' },
   { id: 'banco-provincia', name: 'Banco Provincia', category: 'Banco / Fintech / Billetera', city: 'La Plata', note: 'Banca pública bonaerense, QA en canales digitales', link: 'https://www.bancoprovincia.com.ar' },
   { id: 'banco-ciudad', name: 'Banco Ciudad', category: 'Banco / Fintech / Billetera', city: 'CABA', note: 'Banca pública de la ciudad con banca digital', link: 'https://www.bancociudad.com.ar' },
@@ -131,6 +166,9 @@ export const CONSULTORAS = [
   { id: 'dolarap', name: 'DolarApp', category: 'Banco / Fintech / Billetera', city: 'Buenos Aires', note: 'Cuenta en dólares digital, fintech', link: 'https://www.dolarapp.com' },
 
   // ---- Gobierno / Sector público (organismos que requieren QA) ----
+  // ↑ Grupo "Gobierno / Sector Público": organismos y entidades provinciales que
+  // ↑ necesitan testers, PERO con otra dinámica: se entra por concurso público, no
+  // ↑ por una vacante publicada. El `link` es el sitio oficial del organismo.
   { id: 'gob-innovacion', name: 'Secretaría de Innovación y Transformación Digital', category: 'Gobierno / Sector Público', city: 'CABA', note: 'Proyectos de gobierno digital y calidad de software', link: 'https://www.argentina.gob.ar' },
   { id: 'sec-pressupuesto', name: 'Secretaría de Presupuesto y Hacienda', category: 'Gobierno / Sector Público', city: 'CABA', note: 'Sistemas de gestión presupuestaria con QA', link: 'https://www.argentina.gob.ar' },
   { id: 'anses', name: 'ANSES', category: 'Gobierno / Sector Público', city: 'CABA', note: 'Desarrollo propio de sistemas con aseguramiento de calidad', link: 'https://www.anses.gob.ar' },
@@ -152,3 +190,17 @@ export const CONSULTORAS = [
   { id: 'ecosistema-cordoba', name: 'Gobierno de Córdoba (TICs)', category: 'Gobierno / Sector Público', city: 'Córdoba', note: 'Gobierno digital provincial con QA', link: 'https://www.cba.gov.ar' },
   { id: 'gsm-santa_fe', name: 'Gobierno de Santa Fe (TICs)', category: 'Gobierno / Sector Público', city: 'Santa Fe', note: 'Servicios digitales provinciales', link: 'https://www.santafe.gob.ar' },
 ];
+
+// ↑ FIN DEL DIRECTORIO. Igual que en curatedJobs.js, acá no hay funciones ni más
+// ↑ exports: este archivo solo aporta el array de empresas.
+//
+// ↑ POR QUÉ ES UN ARRAY PLANO y no un objeto agrupado por categoría:
+// ↑ es para que el frontend pueda filtrar fácil. ConsultorasList.jsx arma la lista
+// ↑ de categorías con un Set de todos los `category` que encuentra, y después
+// ↑ muestra solo las que coinciden con el filtro elegido. Con un array plano,
+// ↑ agregar o quitar una empresa es agregar o quitar una línea, sin tocar nada más.
+//
+// ↑ PARA AGREGAR UNA EMPRESA: se pega una línea más con las mismas 6 llaves. El
+// ↑ `id` tiene que ser único y estable (es la llave con la que se guarda el estado
+// ↑ de contacto), y la `category` tiene que coincidir con una de las ya usadas si
+// ↑ querés que aparezca en el filtro.

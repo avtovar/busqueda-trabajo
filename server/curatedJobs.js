@@ -8,21 +8,66 @@
 // propio, LinkedIn). No salen de las fuentes remotas escaneadas; se agregan
 // manualmente a su país (región). Cada entrada incluye el texto de la vacante
 // con sus skills para que el motor de matching calcule el % correctamente.
+// ↑ Catálogo curado a mano: ofertas que el usuario relevó personalmente de las
+// ↑ bolsas propias de cada consultora (mail, portal propio, LinkedIn). Se suman a
+// ↑ las que llegan de las fuentes en vivo y el motor de matching les calcula el %
+// ↑ de coincidencias igual que a las demás.
+// ↑ Es dato estático: un array plano de objetos, uno por oferta, sin lógica.
+// ↑ Para qué existe: hay muchas vacantes que solo se ven por mail o LinkedIn,
+// ↑ que ningún portal público publica. Sin este archivo, esas ofertas no existirían.
 export const CURATED_JOBS = [
   // ============ ARGENTINA ============
+  // ↑ El catálogo está ordenado en BLOQUES por región (Argentina, México, Perú,
+  // ↑ Colombia, Chile, Europa y Remoto Global). El bloque es solo una separación
+  // ↑ visual para el que lee el archivo: el orden del array no define nada, cada
+  // ↑ oferta lleva su propia región en el campo `regionGuess`.
   {
+    // ↓ CONTRATO DE CADA OFERTA: abajo se lee la PRIMERA ficha completa
+    // ↓ para ver qué llaves tiene. Ese es el MISMO formato que devuelve /api/jobs.
     id: 'curated-crowdar-qa',
+    // ↑ `id`: clave única de la oferta. El prefijo "curated-" la distingue de las
+    // ↑ ids de las fuentes en vivo (que usan "remotive-", "arbeitnow-", etc.) para
+    // ↑ que nunca choquen entre sí. También sirve para abrir el detalle por URL.
     source: 'Directo (Crowdar)',
+    // ↑ `source`: de dónde salió la oferta a mano. Acá siempre dice "Directo (...)"
+    // ↑ o algo tipo "QA Watcher (via LinkedIn)", porque ninguna viene de un portal
+    // ↑ automático. El frontend lo muestra como etiqueta para distinguirlas.
     title: 'QA / QA Automation Engineer',
+    // ↑ `title`: el puesto tal cual lo publicaron. Se ve en la tarjeta de la oferta
+    // ↑ y es parte del texto que el matcher analiza para calcular el porcentaje.
     company: 'Crowdar',
+    // ↑ `company`: la empresa contratante. Junto con el título arma la clave que
+    // ↑ usa history.js para saber si una oferta ya la viste antes.
     location: 'Buenos Aires, Argentina',
+    // ↑ `location`: la ubicación tal como está escrita en la publicación. Puede
+    // ↑ traer el detalle de híbrido, remoto, zona, etc. Es texto libre.
     regionGuess: 'argentina',
+    // ↑ `regionGuess`: la región ya adivinada a mano, con el nombre que usa el
+    // ↑ sistema (argentina, mexico, peru, colombia, chile, europa, eeuu). Es la
+    // ↑ pista que matcher.js toma como prioridad para elegir la pestaña.
     applyUrl: 'https://crowdar.peopleforce.io/careers',
+    // ↑ `applyUrl`: el link o el mail de postulación. Puede ir vacío ('') cuando la
+    // ↑ empresa no lo publica o hay que escribirle a un recruiting: en ese caso el
+    // ↑ dato útil queda escrito dentro de la `description`.
     description:
       'Crowdar (organizadora de Testear.la) suma perfiles de QA y Testing: QA Automation, Tester Manual, Chapter Lead, y roles en automatización, desarrollo, data, cloud y SAP. Valoramos experiencia en testing funcional y automatizado (web y mobile), APIs, y conocimiento de metodologías ágiles. Suma el uso de IA aplicada a testing y automatización inteligente.',
+    // ↑ `description`: el texto de la vacante, lo más largo de la ficha. Se copia
+    // ↑ casi textual de la publicación original, con sus requisitos y skills, y es
+    // ↑ justamente el texto que el matcher recorre para calcular el porcentaje.
+    // ↑ Por eso está en mayúsculas parciales y no resumido: si lo acortás, las
+    // ↑ palabras clave se pierden y el match de esa oferta baja.
     tags: ['qa', 'qa automation', 'testing', 'automation', 'manual testing', 'api testing'],
+    // ↑ `tags`: los skills pedidos por la vacante, como lista de textos. Es la
+    // ↑ parte más importante para el % de match: se comparan contra las skills
+    // ↑ del CV, y de ahí salen los campos `matched` y `missed` que ve el usuario.
     salary: '',
+    // ↑ `salary`: el sueldo, si la publicación lo dice. Casi siempre va vacío ('')
+    // ↑ porque las bolsas de empleo no lo publican: es un campo opcional.
     date: '2026-09-01',
+    // ↑ `date`: el día en que se cargó esta oferta al catálogo, en formato
+    // ↑ AAAA-MM-DD. history.js la usa para ir expirando las más viejas.
+    // ↑ OJO con `modality`: no está en esta ficha, pero es un campo OPCIONAL que
+    // ↑ aparece en muchas otras y el frontend lo pinta como etiqueta (chip 🕒).
   },
   {
     id: 'curated-qactions-sap',
@@ -344,6 +389,7 @@ export const CURATED_JOBS = [
   },
 
   // ============ MÉXICO ============
+  // ↑ Offers de México. Todas las de este bloque llevan regionGuess: 'mexico'.
   {
     id: 'curated-mx-coderdoad-qa-auto',
     source: 'Tech Jobs in Mexico',
@@ -514,6 +560,7 @@ export const CURATED_JOBS = [
   },
 
   // ============ PERÚ ============
+  // ↑ Ofertas de Perú (regionGuess: 'peru'), relevéadas de bolsas locales.
   {
     id: 'curated-pe-valtx-qa-ia',
     source: 'Directo (Valtx)',
@@ -629,6 +676,7 @@ export const CURATED_JOBS = [
   },
 
   // ============ COLOMBIA ============
+  // ↑ Ofertas de Colombia (regionGuess: 'colombia').
   {
     id: 'curated-co-ezertech-analista-qa',
     source: 'Directo (EZERTECH)',
@@ -715,6 +763,7 @@ export const CURATED_JOBS = [
   },
 
   // ============ CHILE ============
+  // ↑ Ofertas de Chile (regionGuess: 'chile').
   {
     id: 'curated-cl-randstad-qa-junior',
     source: 'Directo (Randstad Chile)',
@@ -745,6 +794,7 @@ export const CURATED_JOBS = [
   },
 
   // ============ EUROPA ============
+  // ↑ Ofertas de España y el resto de Europa (regionGuess: 'europa').
   {
     id: 'curated-eu-soaint-qa-auto',
     source: 'Directo (SOAINT)',
@@ -762,6 +812,12 @@ export const CURATED_JOBS = [
   },
 
   // ============ REMOTO GLOBAL (empresa no publicada) ============
+  // ↑ Bloque "cajón de sastre": ofertas 100% remotas para el mundo entero. Como
+  // ↑ no son de un país concreto, casi todas caen en la región 'eeuu' y en el
+  // ↑ `company` puede figurar "No publicada (...)" o "Confidencial (Remoto)":
+  // ↑ la vacante se capturó de un post de LinkedIn sin el nombre de la empresa.
+  // ↑ También pasa acá que el `applyUrl` sea un mail en vez de una URL: para eso
+  // ↑ el frontend lo muestra igual como link (abre el cliente de correo).
   {
     id: 'curated-global-watcher-test-auto',
     source: 'QA Watcher (via LinkedIn)',
@@ -838,3 +894,20 @@ export const CURATED_JOBS = [
     date: '2026-09-10',
   },
 ];
+
+// ↑ FIN DEL CATÁLOGO. Ojo: acá no hay ninguna función auxiliar ni más exports;
+// ↑ lo único que este archivo entrega al resto del proyecto es el array de arriba.
+
+// ↑ CÓMO SE EVITAN DUPLICADOS: este archivo es solo el dato, la deduplicación
+// ↑ la hacen los demás módulos. La primera barrera es el `id` con prefijo
+// ↑ "curated-", que nunca se repite dentro del array y jamás coincide con el de
+// ↑ una oferta de las fuentes en vivo. La segunda es la clave `titulo::empresa`
+// ↑ que arman jobSources.js (dedupeKey) e history.js (keyOf) más adelante: si la
+// ↑ misma vacante aparece en vivo y también curada, el título y la empresa la
+// ↑ delatan y la oferta repetida se descarta.
+
+// ↑ PARA AGREGAR UNA OFERTA A MANO: se pega un objeto más con las mismas 11
+// ↑ llaves, dentro del bloque de su región, y ya está. El resto del proyecto no
+// ↑ hay que tocarlo: index.js concatena este array al resultado de las fuentes
+// ↑ en vivo, matcher.js le calcula el % de match y lo agrupa por región, y el
+// ↑ frontend lo lista igual que cualquier otra oferta.

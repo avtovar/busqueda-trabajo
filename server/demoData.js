@@ -6,8 +6,36 @@
 // Datos de respaldo (demo) usados cuando las fuentes en vivo están bloqueadas.
 // Garantizan que la app y sus endpoints funcionen SIEMPRE, aunque no haya
 // conexión a las APIs de empleo. Contienen el formato completo (match incl.).
+// ↑ Contiene ofertas de EJEMPLO (datos inventados) que se usan solo como último
+// ↑ recurso: cuando las fuentes en vivo fallan, devuelven 0 resultados o están
+// ↑ bloqueadas. Sirven para dos cosas: que la UI nunca se vea vacía (el usuario
+// ↑ puede probar botones, filtros y detalle sin conexión) y que los endpoints
+// ↑ /api/* respondan 200 siempre, para que no fallen los tests ni se caiga la app.
+// ↑ Ojo: NO son datos reales. Las empresas son de mentira y los links apuntan a
+// ↑ example.com, justamente para que nadie los confunda con una oferta verdadera.
+//
+// ↓ La forma es un OBJETO con una clave por región, y no un array plano como en
+// ↓ curatedJobs.js. ¿Por qué? Porque acá el servidor NO vuelve a clasificar nada:
+// ↓ cuando entra el modo demo, index.js copia estas listas tal cual a la respuesta
+// ↓ (solo las ordena por `score`) y las keys DEBEN coincidir con las regiones que
+// ↓ usa la app: 'argentina', 'europa' y 'eeuu'.
 export const DEMO_JOBS = {
+  // ↓ Cada valor es un array de ofertas de ejemplo de esa región.
   argentina: [
+    // ↓ Para que el modo demo se vea igual que el real, estas ofertas mockean el
+    // ↓ formato COMPLETO de la respuesta, incluido el resultado del matching:
+    // ↓   id, source, title, company, location, regionGuess, applyUrl, description,
+    // ↓   tags  → los mismos campos que trae una oferta curada o de una fuente en
+    // ↓            vivo (el "contrato" que devuelve /api/jobs).
+    // ↓   matched     → skills del CV que SÍ encontró en la vacante.
+    // ↓   missed      → skills que pidió la vacante y no están en el CV.
+    // ↓   requested   → lo que el usuario pidió buscar (va en la barra de búsqueda).
+    // ↓   roles       → los roles detectados en el título (QA, automation...).
+    // ↓   inTitle     → true si alguna de esas palabras aparece en el título.
+    // ↓   score       → el % de coincidencia, un número de 0 a 100.
+    // ↓ Los campos del matching (matched, missed, score...) los calcula
+    // ↓ matcher.js cuando las ofertas son reales; al estar mockeados, el frontend
+    // ↓ los puede pintar tal cual y los tests no dependen de la red.
     {
       id: 'demo-ar-1', source: 'Demo', title: 'QA Automation Engineer', company: 'Ejemplo Fintech',
       location: 'Buenos Aires', regionGuess: 'argentina', applyUrl: 'https://example.com/apply',
@@ -26,6 +54,8 @@ export const DEMO_JOBS = {
     },
   ],
   europa: [
+    // ↑ Ofertas de ejemplo para la región Europa. Mismo formato que las de arriba:
+    // ↑ `regionGuess: 'europa'` es lo que hace que la oferta caiga en esa pestaña.
     {
       id: 'demo-eu-1', source: 'Demo', title: 'QA Software Engineer (Mobile)', company: 'EU Bank',
       location: 'Madrid, Spain', regionGuess: 'europa', applyUrl: 'https://example.com/eu1',
@@ -36,6 +66,9 @@ export const DEMO_JOBS = {
     },
   ],
   eeuu: [
+    // ↑ Ofertas de ejemplo para la región EEUU (y remoto USA). Fijate que esta
+    // ↑ tiene `missed: ['docker']` a propósito: sirve para ver en la interfaz cómo
+    // ↑ se muestran las skills que te faltan, sin tener que inventar una búsqueda.
     {
       id: 'demo-us-1', source: 'Demo', title: 'SDET (QA Automation Engineer)', company: 'US TechStartup',
       location: 'Remote - US', regionGuess: 'eeuu', applyUrl: 'https://example.com/us1',
@@ -48,6 +81,15 @@ export const DEMO_JOBS = {
 };
 
 // Devuelve el plano (flat) de las ofertas demo
+// ↑ La app por dentro guarda las ofertas agrupadas por región (un objeto con una
+// ↑ lista por región) y recién al responder /api/jobs le pasa la lista de UNA sola
+// ↑ región. Esta función hace el camino contrario: junta las 3 listas de demo en
+// ↑ una sola. `Object.values` saca los 3 arrays del objeto y `.flat()` los une.
+// ↑ Sirve para recorrer todas las ofertas demo juntas, sin ir región por región.
+// ↑ Dato: hoy ningún archivo del proyecto la llama (es una utilidad que queda
+// ↑ disponible por si hace falta); el modo demo de index.js usa DEMO_JOBS directo.
 export function demoFlat() {
+  // ↑ Notá que solo devuelve datos: no guarda nada, no llama a la red ni muta el
+  // ↑ objeto DEMO_JOBS. Cada vez que se llama arma un array nuevo.
   return Object.values(DEMO_JOBS).flat();
 }

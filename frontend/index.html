@@ -1,14 +1,54 @@
 <!DOCTYPE html>
+<!-- ↑ Este es el ÚNICO archivo "real" de HTML de una app React como esta.
+     ↑ Todo el resto de la interfaz se dibuja con JavaScript dentro de este
+     ↑ archivo. Por eso se lo llama el "HTML raíz" o "contenedor": es el andamio
+     ↑ mínimo que necesita el navegador para después dibujar la app entera.
+     ↑ La línea de arriba declara que se usa HTML5 moderno, sin "quirks mode". -->
 <html lang="es">
+<!-- ↑ lang="es" declara el idioma del contenido. Sirve para que los lectores de
+     ↑ pantalla lo lean con pronunciación española y para que el motor de búsqueda
+     ↑ (Google) sepa en qué idioma está la página. -->
 <head>
+  <!-- ↑ <head> es la parte invisible: acá va la metadata, NO lo que se ve. -->
+  <!-- ↑ charset: le dice al navegador con qué codificación está guardado el texto.
+       ↑ UTF-8 es el estándar y es el ÚNICO que aguanta acentos (está, función,
+       ↑ búsqueda), la tilde (~) y los emojis (🎯) a la vez. Si esta línea falta o
+       ↑ está mal, los acentos se ven como caracteres raros: "busqueda" en vez
+       ↑ de "búsqueda". Además tiene que ser la PRIMERA cosa del <head>. -->
   <meta charset="UTF-8" />
+  <!-- ↑ viewport: le dice cómo se comporta la página en pantallas chicas.
+       ↑ device-width = usar el ancho real del celular (NO el de un escritorio
+       ↑ virtual, que es mucho más ancho) e initial-scale=1.0 = no achicar la
+       ↑ página de entrada. Sin esta línea, el celular la muestra en miniatura y
+       ↑ hay que hacer zoom para leer: es de las metas más importantes en móviles. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BuscaEmpleo · Mi próximo trabajo QA</title>
+  <!-- ↑ title: el título de la pestaña del navegador y del resultado de Google.
+       ↑ Ojo: es metadata, no el encabezado visible de la app. -->
   <meta name="description" content="Buscador de las mejores ofertas de empleo adaptadas al perfil de Ali Tovar (QA Engineer), separadas por región." />
+  <!-- ↑ description: el resumen que Google muestra en azul abajo del título. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>" />
+  <!-- ↑ El ícono de la pestaña, escrito como SVG adentro de la propia URL con
+       ↑ prefijo data: (así no hace falta un archivo .ico aparte). El emoji 🎯 es
+       ↑ el mismo que usa el título de la app, y para que se dibuje bien tiene
+       ↑ que estar en una página UTF-8 como esta. -->
 </head>
 <body>
+  <!-- ↑ <body> es lo que el usuario ve de verdad. -->
   <div id="root"></div>
+  <!-- ↑ Este div está VACÍO a propósito y es el corazón de una SPA: React entra
+       ↑ después y lo llena con toda la interfaz. El id="root" no es decoración,
+       ↑ es el nombre exacto que React busca en main.jsx para saber dónde
+       ↑ dibujarse (se llama root = raíz, y de ahí el nombre "React root").
+       ↑ Con este HTML solo, sin JavaScript, la página se vería en blanco. -->
+  <!-- ↑ type="module" le dice al navegador que ese archivo ES un módulo de
+       ↑ JavaScript moderno, y no el clásico "text/javascript". Gracias a esto se
+       ↑ puede usar import/export y el navegador se encarga solo de esperar y
+       ↑ descargar todo lo que ese archivo importa. -->
   <script type="module" src="/src/main.jsx"></script>
+  <!-- ↑ Acá se carga TODO: este script es el punto de entrada de React. O sea que
+       ↑ el flujo es: navegador lee este HTML → ejecuta main.jsx → React dibuja
+       ↑ dentro del div#root de arriba. Todo lo demás (App.jsx, los componentes,
+       ↑ los estilos) se importa desde main.jsx, no desde este archivo. -->
 </body>
 </html>
