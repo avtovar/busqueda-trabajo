@@ -1,0 +1,213 @@
+# ============================================================================
+# CD Carril 1 — GitHub Pages (la UI estática)
+# ============================================================================
+# ----------------------------------------------------------------------------
+# ⚠️  PASO OBLIGATORIO UNA SOLA VEZ, ANTES DE QUE ESTE WORKFLOW SIRVA PARA
+#     ALGO — En el repo, entrá a:
+#
+#         Settings  →  Pages  →  Build and deployment  →  Source
+#
+#     y elegí  "GitHub Actions".
+#
+#     Si lo dejás en "Deploy from a branch", GitHub ignora este workflow
+#     por completo y la URL te va a mostrar un 404 sin explicación útil.
+#     Recién después de cambiar eso, hacé un push a `main` (o corré el
+#     workflow a mano con el botón "Run workflow").
+#
+# ----------------------------------------------------------------------------
+# 🚨 LIMITACIÓN ARQUITECTÓNICA — LEÉ ESTO ANTES DE PROBARLO
+#
+#     Esta aplicación tiene un BACKEND DE VERDAD (server/index.js) con la API
+#     de ofertas, historial, cartas y el tracker de consultoras. Y GitHub
+#     Pages sirve EXCLUSIVAMENTE archivos estáticos: no ejecuta Node, no
+#     corre un servidor y no puede tener variables de entorno.
+#
+#     Por eso este carril NO reemplaza al backend. Publica el frontend
+#     compilado como una DEMO VISUAL: la interfaz se ve y se navega, pero
+#     todas las llamadas a /api/* van a devolver 404 porque el backend no
+#     está. Como mucho vas a ver el estado vacío o los datos de respaldo
+#     que el propio frontend tiene (ver frontend/src/api.js).
+#
+#     Para tener la app COMPLETA y funcional necesitás el backend corriendo
+#     en algún lado. Eso es lo que hace el carril 2 (docker.yml), que
+#     publica una imagen con el frontend compilado + el server Node listo
+#     para correrse en cualquier host de Node.
+#
+#     O sea: los dos carriles son complementarios, no excluyentes.
+#         Pages  → demo / portfolio / mostrar la UI
+#         GHCR   → app real, desplegada en un servidor propio
+#
+# ----------------------------------------------------------------------------
+# CÓMO SE EJECUTA
+#     - Automático en cada push a `main` que toque: el frontend, el Dockerfile
+#       o este mismo workflow. Un cambio en server/ NO dispara Pages, porque
+#       la build de Pages no usa el backend.
+#     - Manual: pestaña Actions  →  este workflow  →  botón "Run workflow".
+# ============================================================================
+
+name: Deploy Pages (UI estática)
+
+on:
+  push:
+    branches: [main]
+    # `paths` evita Builds inútiles: si tocás un README o un archivo de
+    # server/, la UI estática de Pages no cambia ni un byte, así que no
+    # tiene sentido gastar un runner ni desplegar otra vez lo mismo.
+    paths:
+      - 'frontend/**'              # código, estilos, vite.config.js y lockfile
+      - 'Dockerfile'               # si cambia la imagen, se redeploya la UI
+      - '.github/workflows/deploy-pages.yml'
+      - '.github/workflows/ci.yml'  # por si cambia el contrato de la build
+  workflow_dispatch:              # ejecución manual desde la pestaña Actions
+
+# ---------- Permisos: el mínimo para publicar en Pages ----------
+# contents: read  → clonar el repo
+# pages: write    → crear el deployment de Pages
+# id-token: write → el token de OIDC que Pages usa para probar que el
+#               deploy viene de un workflow legítimo y no de alguien cualquiera
+#               con un token robado. NUNCA uses un PAT para esto.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# ---------- Un despliegue a la vez ----------
+# group: pages  → todos los deploys de Pages comparten grupo, así dos pushes
+#                 seguidos no se pisan entre sí.
+# cancel-in-progress: false → NUNCA se cancela un deploy a medio hacer. Si se
+#                 cancelara, el sitio quedaría en un estado inconsistente
+#                 (mitad del artifact viejo, mitad del nuevo).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # ======================================================================
+  # Job único: build + deploy.
+  # Se hace en un solo job a propósito, aunque se podría partir en dos:
+  # el artifact de Pages es chico (unos cientos de KB) y partirlo agregaría
+  # una descarga/subida extra entre runners sin ganar nada.
+  # ======================================================================
+  deploy:
+    name: Compilar y publicar en GitHub Pages
+    runs-on: ubuntu-latest
+    # `environment: github-pages` es lo que ata este job al environment de
+    # Pages: es el que genera el `page_url` y el que muestra el badge
+    # "In progress / Success" en la pestaña Deployments del repo.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      # Prepara la infraestructura de Pages de la repo (artifact de
+      # despliegue, rama de preview, etc.) y expone la variable
+      # `base_path` que se usa más abajo. El `id: pages` es OBLIGATORIO: es
+      # el nombre con el que después se lee `steps.pages.outputs.base_path`.
+      - name: Configurar Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      # Node 20 con caché de npm. La caché se ancla al lockfile DEL FRONTEND
+      # (frontend/package-lock.json), no al de la raíz: son dos proyectos
+      # independientes y cada uno tiene su propio árbol de dependencias.
+      - name: Preparar Node 20 con caché de npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ------------------------------------------------------------------
+      # Build del frontend. Es EXACTAMENTE el mismo comando que usás local,
+      # así que lo que se sube a Pages es lo mismo que ves en tu máquina.
+      # `npm ci` y no `npm install`: instala lo que dice el lockfile, sin
+      # resolver versiones ni modificarlo. Si el lockfile estuviera roto,
+      # falla acá de forma explícita en vez de "funcionar a veces".
+      # ------------------------------------------------------------------
+      - name: Instalar dependencias del frontend
+        working-directory: frontend
+        run: npm ci
+
+      # ------------------------------------------------------------------
+      # `base` es lo que le dice a Vite dónde va a vivir la app. Con Pages el
+      # dominio es algo como https://<usuario>.github.io/busqueda_trabajo/
+      # y el proyecto tiene guion bajo, que los paths de Pages SÍ respetan.
+      # Sin `base` explícito, Vite asume '/' y pediría los assets en la raíz
+      # del dominio, donde no están: la página saldría con estilos rotos.
+      #
+      # Por eso NO se usa el `npm run build` pelado: se le pasa `--base` con
+      # el path que reporta Pages, en una sola compilación.
+      # (Si algún día el repo se publica en la raíz del dominio, o sea
+      #  usuario.github.io sin subcarpeta, esto se puede quitar y alcanza
+      #  con `npm run build` a secas.)
+      # ------------------------------------------------------------------
+      - name: Compilar el frontend con Vite usando el base path de Pages
+        working-directory: frontend
+        env:
+          # steps.pages.outputs.base_path viene como "/busqueda_trabajo/".
+          # Vite acepta "/repo" o "/repo/": se le saca la barra final, que es
+          # la forma que Vite documenta como recomendada.
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          set -euo pipefail
+          echo "Base path que reporta Pages: '$PAGES_BASE_PATH'"
+          base="${PAGES_BASE_PATH%/}"
+          echo "Compilando con: npm run build -- --base=$base"
+          npm run build -- --base="$base"
+
+      # Comprobación de que la build produjo lo que Pages necesita.
+      - name: Verificar el contenido de frontend/dist
+        run: |
+          set -euo pipefail
+          test -f frontend/dist/index.html \
+            || { echo "::error::No se generó frontend/dist/index.html"; exit 1; }
+          # Un index.html sin los assets de Vite (script/link con /assets/)
+          # significa que el base quedó mal: la página publicada saldría
+          # en blanco. Esto lo detecta antes de gastar un deploy.
+          grep -q '/assets/' frontend/dist/index.html \
+            || { echo "::error::index.html no referencia /assets/: revisá el base path"; exit 1; }
+          echo "OK. Contenido de frontend/dist:"
+          ls -la frontend/dist
+
+      # ------------------------------------------------------------------
+      # 404.html = copia exacta de index.html.
+      # GitHub Pages es un servidor de archivos estáticos, no una SPA server.
+      # Si alguien entra a https://<usuario>.github.io/busqueda_trabajo/mi-ruta
+      # (o refresca con F5 en una subruta), Pages busca un archivo llamado
+      # exactamente eso, no lo encuentra y devuelve su 404 propio en vez de
+      # nuestra página. Copiar index.html a 404.html resuelve el caso: la
+      # persona ve la app, React monta, y como esta SPA no usa react-router
+      # (las pestañas son estado dentro de App.jsx, no URLs), la app carga
+      # igual y todo funciona.
+      # El 404 oficial solo se ve si el usuario Teclea una ruta que ni
+      # siquiera debería existir; en la práctica nunca aparece.
+      # ------------------------------------------------------------------
+      - name: Crear 404.html (copia de index.html) para rutas directas
+        run: |
+          set -euo pipefail
+          cp frontend/dist/index.html frontend/dist/404.html
+          echo "Contenido de frontend/dist que se va a subir a Pages:"
+          ls -la frontend/dist
+
+      # ------------------------------------------------------------------
+      # Artifact de Pages. OJO con el `path`: es SOLO `frontend/dist`.
+      # El workflow anterior del repo subía `path: '.'`, o sea el repo
+      # ENTERO como si fuera un sitio estático: eso publicaba los logs del
+      # servidor, la carpeta server/ y cualquier otra cosa presente en el
+      # working tree. Este paso sube exclusivamente la carpeta que genera
+      # Vite, que es lo único que Pages debe ver.
+      # ------------------------------------------------------------------
+      - name: Subir el artifact de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+      # Deploy final. `id: deployment` es lo que permite leer
+      # `steps.deployment.outputs.page_url` y mostrarla en el environment.
+      - name: Desplegar en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

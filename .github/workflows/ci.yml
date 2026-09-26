@@ -1,0 +1,602 @@
+# ============================================================================
+# CI — Integración Continua
+# ----------------------------------------------------------------------------
+# Este workflow NO publica nada. Solo verifica que el código esté sano ANTES
+# de que los otros dos workflows (deploy-pages.yml y docker.yml) lo publiquen.
+#
+# Qué corre, en orden:
+#   1. validate  → sintaxis del backend, instalación limpia, build de Vite y
+#                  un smoke test REAL levantando el server y consultando la API.
+#   2. security  → auditoría de dependencias + verificación de que en el repo
+#                  no haya ni un secreto ni un archivo que no debe subirse.
+#
+# Cuándo corre: en cada push a `main` y en cada Pull Request, sin importar la
+# rama de destino del PR.
+#
+# Por qué el orden: `security` depende de `validate`. Si el código ni siquiera
+# compila, no tiene sentido auditar dependencias: así el runner se libera antes
+# y el log del error real queda arriba de todo, sin ruido.
+#
+# ----------------------------------------------------------------------------
+# 💰 ESTE PIPELINE ES DE COSTO CERO — LEÉ ESTO ANTES DE AGREGARLE NADA
+# ----------------------------------------------------------------------------
+# Decisión del owner del proyecto: el CI no debe poder gastar plata. Ni en
+# Apify, ni en un actor, ni en ninguna API de pago. Por eso el diseño tiene TRES
+# capas que se defienden entre sí, y las tres están en este archivo:
+#
+#   1. El único check que podía terminar en una llamada de pago
+#      (`POST /api/linkedin-search`) está COMENTADO a propósito, más abajo.
+#   2. Un guard falla el job si `APIFY_API_TOKEN` está definido en el entorno,
+#      así que ni un `secrets.X` agregado por error alcanza para activarlo.
+#   3. El job `security` escanea los archivos versionados buscando el prefijo
+#      real de los tokens de Apify (`apifsk_`), por si alguien pega uno en
+#      cualquier archivo del repo.
+#
+# Lo que SÍ queda activo son endpoints que no cuestan nada: `/api/jobs` consulta
+# bolsas de empleo públicas y gratuitas (Remotive, Arbeitnow, Himalayas,
+# RemoteOK, Jobicy). El detalle de por qué está comentado el de Apify, y cómo
+# reactivarlo si algún día conviene pagarlo, está escrito en el mismo punto.
+# ============================================================================
+
+name: CI
+
+# ---------- Cuándo se dispara ----------
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Sin filtros: TODOS los PRs pasan por acá, aunque toquen solo un README.
+    branches: [main]
+
+# ---------- Permisos mínimos ----------
+# El CI solo LEE el código. No necesita escribir nada en el repo ni en Pages,
+# así que se le da el token más poderoso posible: solo lectura. Si algún día
+# alguien agrega un paso que publica, esto lo detiene y hay que pensarlo.
+permissions:
+  contents: read
+
+# ---------- Política de auditoría de dependencias ----------
+env:
+  # raíz: `dotenv` es la ÚNICA dependencia de runtime que viaja a producción,
+  # así que acá el bloqueo es estricto: cualquier high o critical rompe el build.
+  ROOT_AUDIT_LEVEL: high
+  # frontend: `vite` y `esbuild` son devDependencies: se usan para compilar y
+  # NO llegan ni al bundle que sube el navegador ni a la imagen Docker final.
+  # Por eso el bloqueo es `critical` y los `high` se reportan como advertencia.
+  # ADVERTENCIA CONOCIDA: GHSA-fx2h-pf6j-xcff (vite <= 6.4.2, bypass de
+  # `server.fs.deny` en Windows, CVSS 7.5) y GHSA-67mh-4wv8-2f99 (esbuild
+  # <= 0.24.2, solo afecta al dev server). Se corrigen actualizando Vite a
+  # >= 6.4.3, que es un salto de versión mayor: cuando lo hagas, cambiá este
+  # valor a `high` y el gate queda estricto para el frontend también.
+  FRONTEND_AUDIT_LEVEL: critical
+
+# ---------- Un solo CI a la vez ----------
+# Si se empujan dos commits seguidos, el segundo run espera al primero en vez de
+# saturar el runner con builds que después nadie mira. En la rama del PR nunca
+# se cancela nada en curso, para no cortar un job a medio hacer.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ======================================================================
+  # Job 1 — validate: ¿el código está entero y arranca de verdad?
+  # ======================================================================
+  validate:
+    name: Validar, compilar y arrancar (smoke test)
+    runs-on: ubuntu-latest
+    # TIMEBOX: si algo se cuelga, se corta a los 10 minutos. Un job de CI
+    # colgado consume minutos facturables del runner sin dar información útil.
+    timeout-minutes: 10
+
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 1.1 Sintaxis de TODO el backend.
+      # `node --check` parsea el archivo y devuelve error si hay una llave sin
+      # cerrar, un paréntesis desbalanceado o sintaxis inválida. NO ejecuta el
+      # código (no levanta el server, no pega a la red), así que es seguro.
+      # Como el package.json raíz tiene "type": "module", Node lo interpreta
+      # como ESM y el `import` de cada módulo pasa la validación sin problema.
+      # Es un Parser de la casa: no hay ESLint ni tests en este proyecto, y esto
+      # detecta al menos los errores que romperían el arranque.
+      # ------------------------------------------------------------------
+      - name: Verificar sintaxis de los .js del backend (node --check)
+        run: |
+          set -euo pipefail
+          count=0
+          for file in server/*.js; do
+            echo "  node --check $file"
+            node --check "$file"
+            count=$((count + 1))
+          done
+          echo "OK: $count archivo(s) de server/ con sintaxis válida (ESM)."
+
+      # ------------------------------------------------------------------
+      # 1.2 Instalación limpia de las dependencias del backend.
+      # `npm ci` (y no `npm install`) es la diferencia entre "funciona en mi
+      # máquina" y "funciona en todas partes": `npm ci` BORRA node_modules y
+      # reinstala exactamente lo que dice package-lock.json, sin resolver
+      # versiones ni tocar el lockfile. Si el lock y el package.json no coinciden,
+      # falla acá en lugar de hacerlo de forma silenciosa.
+      # ------------------------------------------------------------------
+      - name: Instalar dependencias del backend (npm ci)
+        run: npm ci
+
+      # ------------------------------------------------------------------
+      # 1.3 Instalación limpia del frontend, CON CACHE.
+      # El lockfile del frontend es un archivo distinto del de la raíz, así que
+      # la clave de caché se ancla a frontend/package-lock.json. Si esa clave no
+      # cambiaron, setup-node reutiliza la carpeta npm/_cacache y la instalación
+      # pasa de ~40 s a ~5 s.
+      # ------------------------------------------------------------------
+      - name: Instalar dependencias del frontend (npm ci, con caché)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias del frontend (npm ci)
+        working-directory: frontend
+        run: npm ci
+
+      # ------------------------------------------------------------------
+      # 1.4 Build real del frontend con Vite.
+      # Esta es la verificación de valor más alta del workflow: si el JSX tiene
+      # un error de sintaxis, si un import está mal escrito o si el build se
+      # rompe, falla acá — no cuando alguien despliega y la página queda en
+      # blanco. Al terminar, tiene que existir frontend/dist/index.html.
+      # ------------------------------------------------------------------
+      - name: Compilar el frontend con Vite (npm run build)
+        working-directory: frontend
+        run: npm run build
+
+      - name: Comprobar que la build generó frontend/dist/index.html
+        run: |
+          set -euo pipefail
+          test -f frontend/dist/index.html \
+            || { echo "::error::La build no generó frontend/dist/index.html"; exit 1; }
+          echo "frontend/dist contiene:"; ls -1 frontend/dist
+
+      # ------------------------------------------------------------------
+      # 1.5 SMOKE TEST: levantar el servidor de verdad y pegarle a la API.
+      # Esta es la parte que ningún linter reemplaza. Arranca el proceso real,
+      # espera a que responda y consulta endpoints reales, incluido uno que
+      # depende de la build de Vite (GET / devuelve el index.html compilado).
+      # Si el server explota al importar un módulo, si le falta una variable de
+      # entorno o si la ruta está mal calculada, el job falla acá y no después
+      # en producción.
+      #   - Se usa el puerto 3100 y no el 3000 para no chocar con nada que pueda
+      #     estar escuchando en el runner.
+      #   - Se escribe un .env VACÍO a propósito y el `env:` del step fuerza
+      #     `APIFY_API_TOKEN: ''`: el CI no puede tener el token real de Apify
+      #     (¡y no lo necesita!), y así se comprueba además que la app arranca
+      #     bien sin secreto, que es el caso por defecto del usuario.
+      #   - Este step NO PUEDE GASTAR PLATA. Hay un guard que falla el job si
+      #     aparece un token, y el único check que podía llegar a una API de
+      #     pago está comentado. Ver el bloque del guard más abajo.
+      #   - El `trap` mata el proceso aunque el script falle: sin esto, un
+      #     `set -e` dejaría un node huérfano ocupando el puerto.
+      # ------------------------------------------------------------------
+      - name: "Smoke test: arrancar el server y consultar la API"
+        run: |
+          set -euo pipefail
+
+          # .env falso: sin APIFY_API_TOKEN, que es el estado normal del proyecto.
+          # Se escribe con el valor vacío explícito y no con un heredoc de
+          # secretos, justamente para que este archivo no sea un lugar donde
+          # colar un token.
+          printf 'APIFY_API_TOKEN=\n' > .env
+
+          # ═══════════════════════════════════════════════════════════════
+          # GUARD DE COSTO — este job NO puede terminar gastando plata.
+          # ═══════════════════════════════════════════════════════════════
+          # Va PRIMERO, antes de arrancar el server y antes de pegarle a
+          # cualquier endpoint, para que si algo está mal se frene acá y no
+          # después de haber ejecutado algo.
+          #
+          # Qué previene: que alguien defina `APIFY_API_TOKEN` como Secret del
+          # repo (o en cualquier variable del job) y el pipeline empiece a
+          # ejecutar el actor de Apify en cada push, que es un servicio que
+          # cobra por ejecución. Sin este chequeo, ese error se pagaría en
+          # silencio durante semanas.
+          #
+          # OJO con la contradicción aparente: si el token está DEFINIDO, este
+          # guard falla. Es correcto y es a propósito. La forma de probar la
+          # búsqueda en LinkedIn no es poner el token acá: es correrla a mano
+          # desde la app o contra un entorno propio. Si algún día se decide
+          # pagar, hay que desactivar ESTE guard a propósito (y en el mismo
+          # commit que se descomente el check de abajo), nunca "por error".
+          if [ -n "${APIFY_API_TOKEN:-}" ]; then
+            echo "::error::APIFY_API_TOKEN está definido en este job. El pipeline no debe tener token de Apify porque las ejecuciones del actor se cobran. Si lo configuraste a propósito, comentá este guard en el mismo commit en que reactivás el check de /api/linkedin-search."
+            exit 1
+          fi
+          echo "OK: sin APIFY_API_TOKEN en el entorno. Este pipeline no puede gastar en Apify."
+
+          # El token también podría colarse por el `.env` que se acaba de
+          # escribir, si alguien edita esta línea y pega un valor real. Se
+          # comprueba el archivo ya escrito, no la línea del script.
+          if grep -qE '^[[:space:]]*APIFY_API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]' .env; then
+            echo "::error::El .env que este job escribe tiene un valor de APIFY_API_TOKEN. Tiene que quedar vacío."
+            exit 1
+          fi
+          echo "OK: el .env de este job no tiene ningún token."
+
+          export PORT=3100
+          node server/index.js > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+
+          # `trap ... EXIT` garantiza el cleanup pase lo que pase (error o no).
+          cleanup() { kill "$SERVER_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          echo "Servidor arrancado con PID $SERVER_PID en el puerto $PORT. Esperando..."
+
+          # Espera activa: se prueba hasta 30 veces, una por segundo. Se usa el
+          # status HTTP de curl (-o /dev/null -w '%{http_code}') porque un 503 o
+          # un 404 también son "el server ya está escuchando": lo que importa
+          # para el arranque es que haya conexión, no el código de esa ruta.
+          ready=0
+          for i in $(seq 1 30); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::El proceso del servidor murió durante el arranque:"
+              cat /tmp/server.log
+              exit 1
+            fi
+            code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/health" || true)
+            if [ "$code" = "200" ]; then ready=1; break; fi
+            sleep 1
+          done
+
+          if [ "$ready" != "1" ]; then
+            echo "::error::El servidor no respondió 200 en /api/health tras 30 s. Log:"
+            cat /tmp/server.log
+            exit 1
+          fi
+          echo "El servidor está escuchando."
+
+          # --- Verificaciones reales de endpoints ---
+          # Cada línea imprime la ruta, el status esperado y el que vino.
+          # 200 = el endpoint existe y funciona.
+          check() {
+            local method="$1" path="$2" expected="$3"
+            local code
+            # --max-time 90: /api/jobs consulta cinco bolsas de empleo en vivo y
+            # cada una tiene un timeout interno de 20 s, así que 90 s es amplio
+            # margen sin dejar el job colgado si la red del runner se cae.
+            code=$(curl -s --max-time 90 -o /tmp/resp.json -w '%{http_code}' -X "$method" \
+                   "http://127.0.0.1:${PORT}${path}")
+            printf '  %-6s %-42s esperado %s, recibido %s\n' "$method" "$path" "$expected" "$code"
+            [ "$code" = "$expected" ] || { echo "::error::Fallo en $path"; cat /tmp/resp.json; exit 1; }
+          }
+
+          echo "Endpoints:"
+          # /api/health: el endpoint de vida. Debe devolver {"ok":true}.
+          check GET  /api/health 200
+          grep -q '"ok":true' /tmp/resp.json \
+            || { echo "::error::/api/health no devolvió ok:true"; cat /tmp/resp.json; exit 1; }
+
+          # /api/profile: dato estático, no toca la red. Si esto responde, los
+          # imports del server (cvProfile, matcher, etc.) están bien resueltos.
+          check GET  /api/profile 200
+
+          # /api/consultoras: lee el estado desde disco (data/consultoras-status.json).
+          # Comprueba de paso que el server puede escribir/leer la carpeta data/,
+          # que en Docker tiene que estar montada como volumen.
+          check GET  /api/consultoras 200
+
+          # /api/jobs: el endpoint más pesado (consulta bolsas de empleo). En el
+          # runner puede demorar por red lenta del CI, por eso el `check` usa
+          # `--max-time 90`: lo que se valida es que la ruta exista y responda
+          # 200, no cuántas ofertas trae.
+          #
+          # 💰 ESTE CHECK NO CUESTA PLATA Y POR ESO QUEDA ACTIVO. `/api/jobs`
+          # consulta APIs PÚBLICAS Y GRATUITAS (Remotive, Arbeitnow, Himalayas,
+          # RemoteOK, Jobicy) a través de server/jobSources.js. Ese módulo no
+          # menciona Apify en ningún lado: es imposible que desde acá se llegue
+          # a una API de pago. Es el endpoint central de la app, el que más se
+          # usa y el que más vale la pena seguir verificando.
+          #
+          # Lo único que puede molestar es el TIEMPO: hace unas 7 llamadas de
+          # red a terceros y un runner lento o con red intermitente puede
+          # demorar. Si algún día empieza a hacer fallar el CI por eso, el
+          # arreglo es UNA de estas dos, en orden de preferencia:
+          #   (a) subir los timeouts internos de jobSources.js, o
+          #   (b) comentar este `check` y dejarlo en el log como advertencia.
+          # Comentar una sola línea (esta y su `check`) no rompe el script.
+          check GET  '/api/jobs?region=argentina' 200
+
+          # ═══════════════════════════════════════════════════════════════
+          # 💰 CHECK DE APIFY — COMENTADO A PROPÓSITO. NO LO DESCOMENTES
+          #    SIN LEER ESTO.
+          # ═══════════════════════════════════════════════════════════════
+          # Por qué está comentado:
+          #   `POST /api/linkedin-search` es el ÚNICO endpoint de toda la app
+          #   que puede terminar en una llamada que COBRA. Pasa por
+          #   server/apifyLinkedin.js, que lanza el actor
+          #   `curious_coder~linkedin-jobs-scraper` de Apify con el endpoint
+          #   `run-sync-get-dataset-items` (síncrono, `timeout=180`). Apify
+          #   factura por ejecución del actor, así que cada llamada a este
+          #   check es plata real del owner del proyecto.
+          #
+          # Matiz importante, porque si no se entiende esto el comentario se
+          # lee como una paranoia exagerada y en cualquier momento lo borran:
+          #   HOY este check NO costaría nada. En server/apifyLinkedin.js el
+          #   token se valida ANTES de la llamada: en la línea ~203 se lee
+          #   `process.env.APIFY_API_TOKEN` y en las ~206-208 se lanza un
+          #   `httpError(..., 503)` si está vacío. Recién en la línea ~224 está
+          #   el `fetch`. O sea que, sin token, el endpoint devuelve 503 y
+          #   nunca sale a la red. El riesgo real no es el costo de hoy: es que
+          #   el CI dependería de una condición EXTERNA —que el token no esté
+          #   configurado— que cualquiera puede cambiar sin querer y sin
+          #   enterarse. Si alguien define `APIFY_API_TOKEN` como Secret del
+          #   repo, el actor empezaría a ejecutarse en cada push, en silencio,
+          #   y el cargo aparecería en la factura de Apify, no en el log.
+          #
+          # Por eso igual se comenta: para garantizar POR DISEÑO que el
+          #   pipeline no pueda generar costo, sin depender de que hoy el
+          #   secreto no esté puesto. Una garantía que no depende de que
+          #   nadie se equivoque es más barata que cualquier otra.
+          #
+          # ── Cómo reactivarlo, si algún día conviene pagarlo ──────────────
+          #   1. Descomentar la línea de `check` de más abajo.
+          #   2. Definir `APIFY_API_TOKEN` como Secret del repositorio
+          #      (Settings → Secrets and variables → Actions → New repository
+          #      secret). Ojo: también hay que sacarlo del `env:` del step,
+          #      que hoy lo fuerza a cadena vacía.
+          #   3. Comentar el GUARD DE COSTO de más arriba. Hace falta sí o
+          #      sí: ese guard falla justamente cuando el token está presente,
+          #      así que con el token configurado el job cortaría antes de
+          #      llegar al check.
+          #   4. Correrlo con `workflow_dispatch` MANUAL, no en cada push.
+          #      Este actor cobra por ejecución, así que un check que corre en
+          #      cada push es un gasto recurrente. Manual y consciente es la
+          #      diferencia entre pagar por una búsqueda y pagar sin querer.
+          #
+          # Aviso final: al reactivarlo, este pasa a ser EL ÚNICO check del
+          # pipeline capaz de gastar plata. Todos los demás siguen siendo
+          # gratuitos.
+          #
+          # check POST /api/linkedin-search 503
+
+          # GET / (raíz): el server tiene que servir el frontend YA COMPILADO
+          # desde frontend/dist. Esta comprobación ata el backend con la build
+          # de Vite del paso anterior: si cambia la ruta estática, falla acá.
+          check GET  / 200
+          grep -qi '<div id="root"' /tmp/resp.json \
+            || { echo "::error::GET / no devolvió el index.html de React (frontend/dist)"; head -c 400 /tmp/resp.json; exit 1; }
+
+          # 404 de una ruta que no existe: el fallback estático no debe tirar.
+          check GET  /ruta-que-no-existe 404
+
+          echo
+          echo "Log completo del servidor durante el smoke test:"
+          cat /tmp/server.log
+          echo "SMOKE TEST OK: el server arrancó y todos los endpoints respondieron."
+          echo "Ninguno de estos checks consulta una API de pago: el pipeline no gastó nada."
+        env:
+          # `APIFY_API_TOKEN: ''` NO es un detalle de higiene: es una decisión de
+          # COSTO. Esta línea es la que garantiza que ninguna ruta del server
+          # pueda llegar a una llamada facturada. El server lee el token en
+          # apifyLinkedin.js y corta con 503 si no lo encuentra; con la cadena
+          # vacía, esa condición es INMUTABLE desde el punto de vista de este
+          # job: aunque alguien defina un Secret con el mismo nombre, el `env:`
+          # del step pisa el valor del Secret y el proceso sigue sin token.
+          #
+          # Por eso va en el `env:` del step y no como variable global del
+          # workflow: el alcance más chico es el que menos superficie le deja
+          # a un cambio futuro. Y no la borres "porque no se usa": si desaparece
+          # de acá, el único que frena una ejecución cobrada pasa a ser el
+          # guard de arriba, que solo mira el entorno del proceso.
+          APIFY_API_TOKEN: ''
+
+      - name: Subir el log del servidor si el smoke test falló
+        # Solo se sube cuando algo falló, para no gastar espacio en runnings OK.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-smoke-log
+          path: /tmp/server.log
+          retention-days: 7
+
+  # ======================================================================
+  # Job 2 — security: ¿hay vulnerabilidades o secretos subidos?
+  # ======================================================================
+  security:
+    name: Auditoría de dependencias y secretos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Corre DESPUÉS de validate y en paralelo a nada: si el código no compila,
+    # primero quiero ver ese error, no el de auditoría.
+    needs: validate
+
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 2.1 Cache de npm para los dos proyectos, con dos claves distintas
+      # porque son dos lockfiles distintos.
+      # ------------------------------------------------------------------
+      - name: Preparar caché de npm (raíz)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Preparar caché de npm (frontend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ------------------------------------------------------------------
+      # 2.2 Auditoría del backend.
+      # `dotenv` es la única dependencia que realmente se ejecuta en
+      # producción, así que acá un `high` sí o sí detiene el pipeline.
+      # ------------------------------------------------------------------
+      - name: npm audit del backend (dotenv)
+        run: npm audit --audit-level=${{ env.ROOT_AUDIT_LEVEL }}
+
+      # ------------------------------------------------------------------
+      # 2.3 Auditoría del frontend.
+      # El nivel sale de FRONTEND_AUDIT_LEVEL (arriba está el porqué de que sea
+      # `critical` y no `high`, y el comentario de cómo endurecerlo).
+      # `|| true` NO se usa: si el nivel configurado se supera, el job falla.
+      # Lo que se permite es que los `high` conocidos se marquen como warning.
+      # ------------------------------------------------------------------
+      - name: npm audit del frontend (react + vite)
+        working-directory: frontend
+        run: |
+          set -uo pipefail
+          level="${{ env.FRONTEND_AUDIT_LEVEL }}"
+          if npm audit --audit-level="$level"; then
+            echo "Sin vulnerabilidades de nivel $level o superior en el frontend."
+          else
+            echo "::error::El frontend tiene vulnerabilidades de nivel $level o superior."
+            exit 1
+          fi
+          # Aviso (no bloqueo) por los `high` que quedan pendientes. Se listan
+          # explícitamente para que nadie tenga que ir a buscarlos a npm.
+          if npm audit --audit-level=high --json 2>/dev/null | grep -q '"high"'; then
+            echo "::warning::Vulnerabilidades 'high' pendientes en el frontend (solo devDependencies: vite/esbuild, no llegan a producción). Actualizá Vite a >= 6.4.3 y poné FRONTEND_AUDIT_LEVEL=high para hacerlas bloqueantes."
+            npm audit --audit-level=high 2>/dev/null | grep -E '^(#|[a-z@].*  |Severity|fix available)' || true
+          fi
+
+      # ------------------------------------------------------------------
+      # 2.4 ESCANEO DE SECRETOS Y DE ARCHIVOS PROHIBIDOS.
+      # En vez de gitleaks (que exige licencia para organizaciones con más de
+      # un certain número de usuarios, y agrega una dependencia externa que
+      # puede caerse) se usa un chequeo con `git ls-files`, que es la fuente de
+      # verdad real: la lista EXACTA de archivos que Git está por subir.
+      #
+      # Qué verifica, archivo por archivo:
+      #   - que no esté trackeado .env ni ningún otro .env.* salvo .env.example
+      #   - que no haya nada bajo no_subir/  (material personal y sensible)
+      #   - que no se sigan *.log            (stdout.log, server-err.log, etc.)
+      #   - que no se sigan data/ ni node_modules/  (estado de runtime y dependencias)
+      #   - que .env.example siga con el token vacío
+      #   - que NINGÚN archivo versionado contenga un token de Apify con valor
+      #     real (prefijo `apifsk_` seguido de su cuerpo). Esto último no es un
+      #     chequeo de nombres sino de CONTENIDO, y es la barrera que sostiene la
+      #     política de costo cero del pipeline: ver el bloque al final.
+      # Si encuentra alguno, el job falla y el paso imprime la lista exacta.
+      # Nota: los .log que hay hoy en el disco están en .gitignore, así que
+      # este chequeo confirma que NO se los está por subir.
+      # ------------------------------------------------------------------
+      - name: Verificar que no haya secretos ni archivos prohibidos en el repo
+        run: |
+          set -uo pipefail
+          # `git ls-files` = archivos versionados. Los ignorados por .gitignore
+          # no aparecen, que es exactamente lo que se quiere comprobar.
+          git ls-files -z | tr '\0' '\n' > /tmp/tracked.txt
+          fail=0
+
+          # check_group <título> <regex-que-prohíbe> [regex-para-permitir]
+          # Lista las rutas versionadas que matchean el patrón prohibido.
+          # OJO con `|| true` en cada grep: sin eso, `set -o pipefail` hace que
+          # un grep sin coincidencias (código 1) aborte el script entero, que es
+          # justo el resultado que significa "todo bien".
+          check_group() {
+            local title="$1" pattern="$2" allow="${3:-}"
+            local hits
+            hits=$(grep -E "$pattern" /tmp/tracked.txt || true)
+            if [ -n "$allow" ]; then
+              hits=$(printf '%s\n' "$hits" | grep -vE "$allow" || true)
+            fi
+            if [ -z "$hits" ]; then
+              echo "OK   $title"
+            else
+              echo "FALLA $title"
+              printf '%s\n' "$hits" | sed 's/^/       - /'
+              fail=1
+            fi
+          }
+
+          # --- .env real, en cualquier carpeta ---
+          check_group 'No debe haber archivos .env versionados' '(^|/)\.env$'
+          # --- otras variantes (.env.local, .env.production, .env.keys...) ---
+          # pero .env.example SÍ es legal: es una plantilla sin valores reales.
+          check_group 'No debe haber .env.* versionados (salvo .env.example)' \
+                      '(^|/)\.env\.' '\.env\.example$'
+          # --- material personal y sensible ---
+          check_group 'no_subir/ nunca se sube a Git' '(^|/)no_subir/'
+          # --- logs de runtime: stdout.log, server-err.log, stderr.log...
+          check_group 'Los *.log son de runtime, no se versionan' '\.log$'
+          # --- estado de runtime y dependencias instaladas ---
+          check_group 'data/ es estado de runtime local' '(^|/)data/'
+          check_group 'node_modules/ nunca se versiona' '(^|/)node_modules/'
+
+          # --- inspección del contenido de .env.example ---
+          # El archivo en sí es legal, así que los greps de arriba no lo ven.
+          # Pero si alguien pegó el token real en la plantilla, eso sí es una
+          # fuga: tiene que seguir con el valor vacío.
+          if grep -qE 'APIFY_API_TOKEN=.+' .env.example 2>/dev/null; then
+            echo "FALLA .env.example tiene un valor de APIFY_API_TOKEN (debe quedar vacío)"
+            fail=1
+          else
+            echo "OK   .env.example es una plantilla sin secretos"
+          fi
+
+          # --- BARRERA DE COSTO: el prefijo real de los tokens de Apify ---
+          # `apifsk_` es el prefijo con el que empiezan TODOS los tokens que
+          # genera https://console.apify.com. Es el valor real, no un nombre de
+          # variable: por eso este grep encuentra un token pegado en CUALQUIER
+          # archivo versionado, esté donde esté y se llame como se llame
+          # (un .md, un .json, un .yaml, un .js). Los chequeos de arriba miran
+          # NOMBRES de archivo y nombres de variable; este mira el VALOR.
+          #
+          # OJO con el patrón: NO alcanza con buscar `apifsk_` pelado. Este
+          # mismo repositorio menciona el prefijo en la documentación (está dos
+          # líneas arriba y también en el bloque de Secrets de docker.yml) y un
+          # grep del prefijo solo haría fallar el CI con su propia documentación.
+          # Por eso se exige el prefijo SEGUIDO de un cuerpo largo: un token
+          # real de Apify son `apifsk_` más decenas de caracteres aleatorios, y
+          # un texto que nombra el prefijo nunca va a tener 20 caracteres
+          # alfanuméricos pegados atrás. Eso separa "hablar del token" de
+          # "tener el token".
+          #
+          # Por qué importa para el costo además de la seguridad: un token
+          # pegado en un archivo del repo es la forma más fácil de que, más
+          # adelante, alguien lo copie a un Secret de GitHub "para que el CI
+          # pruebe la búsqueda en LinkedIn". Eso activaría el actor de pago.
+          # Cortar acá, en el push, es mucho más barato que cortar en la
+          # factura de Apify.
+          #
+          # Cómo funciona, en tres pasos:
+          #   1. `xargs grep` recorre SOLO los archivos versionados, leyendo el
+          #      contenido real. Sale por la lista de /tmp/tracked.txt, así que
+          #      los .log y .env del disco, que están en .gitignore, ni se miran.
+          #      `-r` hace que no corra grep si la lista viniera vacía.
+          #   2. `-I` ignora binarios (los .png, .jpg, los .ico del favicon...)
+          #      para que grep no imprima basura ni tarde por nada.
+          #   3. Se imprime el NOMBRE del archivo y la LÍNEA donde apareció, con
+          #      el valor recortado: el log de un job también es un lugar del
+          #      que un token se puede filtrar.
+          apify_hits=$(xargs -a /tmp/tracked.txt -r grep -IEno \
+                       'apifsk_[A-Za-z0-9]{20,}|apify_api_[A-Za-z0-9]{20,}' 2>/dev/null | cut -c1-120 || true)
+          if [ -n "$apify_hits" ]; then
+            echo "FALLA Hay un valor tipo token de Apify en archivos versionados"
+            printf '%s\n' "$apify_hits" | sed 's/^/       - /'
+            echo "       Si pegaste un token real por error: rotalo en https://console.apify.com"
+            echo "       y revocá el que ya estaba. Borrarlo del archivo NO alcanza:"
+            echo "       sigue en el historial de Git."
+            fail=1
+          else
+            echo "OK   Ningún archivo versionado contiene un token de Apify (apifsk_ + cuerpo)"
+          fi
+
+          echo
+          echo "Archivos versionados: $(wc -l < /tmp/tracked.txt | tr -d ' ')"
+
+          if [ "$fail" != "0" ]; then
+            echo
+            echo "::error::Se detectaron archivos sensibles versionados. Ver la lista de arriba."
+            exit 1
+          fi
+          echo "::notice::Ningún secreto ni archivo prohibido en el repositorio."

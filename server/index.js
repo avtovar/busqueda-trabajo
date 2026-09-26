@@ -168,6 +168,14 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   // ---------- API ----------
+  // ↑ Endpoint /api/health: "estoy vivo?" en su forma más simple posible.
+  //   No consulta bolsas de empleo, no lee disco y NO necesita APIFY_API_TOKEN,
+  //   por eso responde siempre al instante. Es lo que usan el HEALTHCHECK del
+  //   Dockerfile y el smoke test de GitHub Actions para confirmar que el
+  //   servidor arrancó de verdad y no solo que el proceso existe.
+  if (url.pathname === '/api/health') {
+    return sendJSON(res, 200, { ok: true, uptime: Math.round(process.uptime()), ts: new Date().toISOString() });
+  }
   // ↑ Endpoint /api/profile: entrega el perfil de Ali para el panel del CV
   if (url.pathname === '/api/profile') {
     return sendJSON(res, 200, PROFILE);

@@ -1,0 +1,83 @@
+# =============================================================================
+# .dockerignore — qué NO se le pasa a Docker en el build.
+# =============================================================================
+# Por qué existe: sin esto, `docker build .` manda al daemon el working tree
+# COMPLETO. Con node_modules de raíz y del frontend, eso son cientos de MB
+# que se comprimen y se transmiten en cada build, y lo peor es que esos
+# archivos pueden quedar cacheados por error en alguna capa de la imagen.
+#
+# Además hay un motivo de SEGURIDAD: sin este archivo, un `docker build .`
+# desde la máquina de alguien pondría el token de Apify (.env) y el material
+# de no_subir/ DENTRO de la imagen. Los layers de una imagen enviada a un
+# registry no se borran: se agrega una capa nueva encima. Que no esté en el
+# .dockerignore no significa "no se ve", significa "queda adentro para siempre".
+#
+# El formato es el mismo de .gitignore, con los mismos patrones.
+# =============================================================================
+
+# ── Dependencias instaladas ───────────────────────────────────────────────────
+# NUNCA se copian al build: se reinstalan adentro con `npm ci` a partir del
+# lockfile. Además, node_modules de Windows tiene archivos que no existen en
+# Linux (y al revés), así que mandarlos rompe la imagen.
+node_modules
+**/node_modules
+
+# ── La build local del frontend ───────────────────────────────────────────────
+# La imagen genera su propio dist en el stage de build. Copiar el dist local
+# además rompe la caché: cambiaría el build aunque no cambie una línea de
+# código, y podría meter un dist viejo o con otro `base` de Pages.
+frontend/dist
+dist
+
+# ── Estado de runtime: es TUYO, no va en la imagen ────────────────────────────
+# Historial de ofertas vistas y estado de contacto de las consultoras.
+# En la imagen, /app/data se crea vacía y se persiste con un VOLUME.
+data
+
+# ── Material personal y sensible ──────────────────────────────────────────────
+# Carpeta local con datos que nunca se suben a ningún lado, mucho menos a un
+# registry. Ver la sección de secretos más abajo.
+no_subir
+
+# ── Secretos ──────────────────────────────────────────────────────────────────
+# El archivo .env con APIFY_API_TOKEN tiene que quedar ABSOLUTAMENTE fuera de
+# la imagen. El token no se necesita para construir: se lee en TIEMPO DE
+# EJECUCIÓN, y en el despliegue se pasa con `-e APIFY_API_TOKEN=...` o con un
+# Secret del orquestador. Por eso la imagen no lo necesita ni para build.
+# OJO: este patrón también excluye .env.example, y está bien: la plantilla no
+# se usa en ningún momento del build ni del runtime.
+.env
+.env.*
+*.env
+
+# ── Logs locales ──────────────────────────────────────────────────────────────
+# stdout.log, server-err.log, stderr.log, etc. Son la salida de procesos que
+# corrieron en la máquina, no parte de la app. Además podrían contener
+# fragmentos de URLs con tokens.
+*.log
+npm-debug.log*
+logs
+
+# ── Git y metadatos del repo ──────────────────────────────────────────────────
+# La historia del repo pesa bastante y dentro de la imagen no sirve para nada.
+# Excluir .git también evita filtrar datos de otros commits por accidente.
+.git
+.gitignore
+.github
+
+# ── Archivos de desarrollo y documentación ────────────────────────────────────
+# El launcher es para tu máquina y los .md no se ejecutan: ocupan espacio y
+# solo confunden a quien lea la imagen.
+*.sh
+README.md
+DOCUMENTACION.md
+LICENSE
+
+# ── Sistema operativo / editores ──────────────────────────────────────────────
+# Nunca están en un build de Linux, pero si alguien hace el build desde otro
+# sistema operativo, acá se filtran.
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+*.swp

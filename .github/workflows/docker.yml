@@ -1,0 +1,328 @@
+# ============================================================================
+# CD Carril 2 — GHCR (imagen con el stack completo)
+# ============================================================================
+# ----------------------------------------------------------------------------
+# QUÉ HACE ESTE WORKFLOW
+# ----------------------------------------------------------------------------
+# Construye una imagen Docker con la aplicación ENTERA (frontend compilado +
+# backend Node) y la publica en el GitHub Container Registry (GHCR), el
+# registry de paquetes que viene incluido en cada repo de GitHub.
+#
+# ----------------------------------------------------------------------------
+# POR QUÉ ESTE CARRIL Y NO EL DE PAGES
+# ----------------------------------------------------------------------------
+# Pages solo puede servir archivos estáticos: no ejecuta Node, no corre un
+# servidor, no tiene variables de entorno. Esta app, en cambio, necesita el
+# backend para que la API de ofertas, el historial, las cartas y el tracker de
+# consultoras funcionen.
+#
+# Entonces:
+#   deploy-pages.yml → publica la UI como demo visual (sin API detrás)
+#   docker.yml (este) → publica la app real, lista para correr en cualquier
+#                       host de Node: un VPS propio, Fly.io, Render, Railway,
+#                       un cluster de Kubernetes, o hasta otra imagen de Docker
+#                       que ya tengas dando vueltas.
+#
+# Los dos carriles conviven. Push a `main` → los dos se actualizan.
+#
+# ----------------------------------------------------------------------------
+# SECRETOS DE GITHUB — LEÉ ESTO ANTES DE DESPLEGAR EN UN HOST REAL
+# ----------------------------------------------------------------------------
+# 💰 ESTE WORKFLOW NO NECESITA NINGÚN SECRETO Y NUNCA LLAMA A APIFY.
+# No es una casualidad ni una omisión: es la razón por la que el pipeline no
+# cuesta plata. Tres cosas lo hacen cierto:
+#
+#   1. El build es REPRODUCIBLE sin token. Ningún `ARG`, ningún `--secret`, ningún
+#      `RUN` del Dockerfile lee APIFY_API_TOKEN: el token se consulta en TIEMPO
+#      DE EJECUCIÓN, adentro de server/apifyLinkedin.js, y solo si alguien
+#      llama a `POST /api/linkedin-search`. El build compila React e instala
+#      `dotenv`; nada de eso toca Apify.
+#   2. El `HEALTHCHECK` de la imagen consulta `/api/health`, que no hace
+#      llamadas de red externas y no necesita token. Como los health checks corren
+#      solos cada 30 s en un contenedor vivo, usar ahí un endpoint de pago sería
+#      pagar sin que nadie lo pidiera. `/api/health` es justamente el que se
+#      eligió por eso.
+#   3. La única autenticación del job es el `GITHUB_TOKEN` automático de GitHub,
+#      que ya viene con `packages: write` declarado abajo.
+#
+# Consecuencia práctica: la imagen se puede construir y publicar desde un FORK
+# o desde un Pull Request sin exponer nada y sin gastar nada. No hay secreto
+# propio que auditar antes de permitir builds de terceros.
+#
+# Lo que sí necesitás configurar en un host real es el token de Apify, y eso
+# NO va en este workflow. Va como Secret del repositorio:
+#
+#     Settings  →  Secrets and variables  →  Actions  →  New repository secret
+#
+#         Name:   APIFY_API_TOKEN
+#         Value:  tu token de https://console.apify.com  (el que empieza con apifsk_)
+#
+# PERO: definí ese Secret en el repositorio que tú controlás, y no esperes que
+# el CI lo use. El `ci.yml` tiene un guard que falla el job si encuentra
+# `APIFY_API_TOKEN` en su entorno, justamente para que nadie lo active por error
+# y empiece a pagar por cada push. Ver el bloque de Secrets al final del job.
+#
+# Si desplegás desde este workflow a un host externo, descomentá el bloque de
+# Secrets al final del job (está comentado abajo a propósito: hoy no se usa, y
+# un `secrets.X` sin configurar no rompe el build pero sí manda un warning).
+#
+# Sobre la visibilidad del paquete en GHCR: el paquete contenedor se crea
+# PRIVADO la primera vez. Para que cualquiera pueda hacer `docker pull` sin
+# cuenta, hay que cambiarlo a público en:
+#     https://github.com/users/<usuario>/packages/container/busqueda-trabajo/settings
+# o, más simple, en la pestaña Packages del repo → hacer clic en el paquete →
+# "Change visibility" → Public. Mismo criterio que en un repositorio público.
+#
+# Para tirar la imagen desde un servidor con Docker pelado, si el paquete
+# quedara privado, hace falta un PAT (classic) con el scope `read:packages`
+# hecho `docker login ghcr.io -u <usuario> --password-stdin`.
+#
+# ----------------------------------------------------------------------------
+# CÓMO CORRERLO A MANO
+# ----------------------------------------------------------------------------
+# Pestaña Actions → "Docker" → botón "Run workflow" → rama main.
+# Sirve para reetiquetar la imagen a `latest` sin tocar código.
+# ============================================================================
+
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    # Solo lo que realmente cambia el contenido de la imagen. Un cambio en un
+    # .md o en un comentario de un workflow no necesita un build de Docker.
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'server/**'              # el backend va entero adentro de la imagen
+      - 'frontend/**'            # el frontend se compila adentro de la imagen
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:             # ejecución manual desde la pestaña Actions
+
+# ---------- Permisos ----------
+# contents: read  → clonar el repo
+# packages: write → publicar la imagen en ghcr.io (y leer la caché de capas)
+permissions:
+  contents: read
+  packages: write
+
+# ---------- Un build a la vez por ref ----------
+# Sin esto, dos pushes seguidos compilan la misma imagen en paralelo y el
+# segundo termina sobreescribiendo el `latest` del primero. Este proyecto es
+# chico, así que cancelar el build viejo es lo más rápido para todos.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+# ---------- Variables compartidas por todos los pasos ----------
+env:
+  # ghcr.io = el registry de GitHub. El nombre del paquete se deriva del
+  # repo, así que un clone arranca con un `docker pull` que ya funciona:
+  #     docker pull ghcr.io/<usuario>/busqueda_trabajo:latest
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ======================================================================
+  # Job único: login → metadatos → build → push.
+  # ======================================================================
+  build:
+    name: Construir y publicar la imagen en GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Bajar el código
+        uses: actions/checkout@v4
+
+      # Crea el builder de BuildKit. BuildKit es el builder moderno de Docker:
+      # es el que soporta la caché multicapa y la salida a registry de forma
+      # eficiente. Sin este paso, docker/build-push-action usa el builder
+      # clásico y `cache-to: type=gha` no funciona.
+      - name: Configurar BuildKit (buildx)
+        uses: docker/setup-buildx-action@v3
+
+      # ------------------------------------------------------------------
+      # Autenticación en ghcr.io.
+      # `secrets.GITHUB_TOKEN` NO es un PAT: es el token que GitHub inyecta en
+      # cada workflow, con vida corta (se invalida al terminar el job) y ya
+      # scopeado a ESTE repositorio. Por eso es la forma correcta de publicar
+      # imágenes propias: no hay que rotar ningún token a mano.
+      # ------------------------------------------------------------------
+      - name: Autenticarse en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ------------------------------------------------------------------
+      # Etiquetas y metadatos de la imagen.
+      # Se generan DOS tags, con propósitos distintos:
+      #   latest   → "la versión buena más reciente". Es la que se tira con
+      #              `docker pull ...:latest` en un despliegue corriente.
+      #   sha-<7>  → el commit exacto, INMUTABLE. Sirve para rollback: si la
+      #              de main rompió algo, `docker pull ...:sha-a1b2c3d` y
+      #              volvés a una imagen que sabemos que andaba.
+      #              Ese prefijo corto se saca del SHA completo del commit.
+      # El label `org.opencontainers.image.source` además hace que GitHub
+      # vincule la imagen con el repo y con los builds que la produjeron.
+      # ------------------------------------------------------------------
+      - name: Calcular tags y labels de la imagen
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=Buscador de Empleo QA
+            org.opencontainers.image.description=Buscador de ofertas QA: frontend React compilado + backend Node sin framework.
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+      # ------------------------------------------------------------------
+      # Build y push.
+      #
+      # `cache-from: type=gha`  → lee las capas del build anterior. Como las
+      #   capas de `npm ci` cambian solo cuando cambia el lockfile, el build
+      #   típico baja de ~90 s a menos de 30 s.
+      # `cache-to: type=gha,mode=max` → guarda TODAS las capas intermedias
+      #   (no solo la final). mode=max usa más espacio pero es lo que hace que
+      #   la caché sirva: sin las capas del stage de build del frontend, la
+      #   próxima vez habría que recompilar React desde cero.
+      # `mode=max` + `cache-from` es el patrón canónico y recomendado.
+      #
+      # `push` se puede apagar desde la config del repo sin tocar este archivo:
+      #   Settings → Secrets and variables → Actions → Variables
+      #       PUBLISH_TO_GHCR = false
+      # Con esa variable definida, el job sigue construyendo la imagen (y
+      # sirve para verificar que el Dockerfile anda) pero no publica nada.
+      # Si NO está definida, publica: el default es publicar.
+      # ------------------------------------------------------------------
+      - name: Construir (y publicar) la imagen
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # `!` delante de la variable: "publica salvo que se diga lo contrario".
+          push: ${{ vars.PUBLISH_TO_GHCR != 'false' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Ojo: NO se pasa ningún --secret ni --build-arg con el token de
+          # Apify acá, y es a propósito. La imagen no lo necesita para
+          # construirse (ver el bloque de Secrets más abajo).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ------------------------------------------------------------------
+      # Resumen: qué se publicó, para no tener que abrir GHCR a mirar.
+      # ------------------------------------------------------------------
+      - name: Resumen de la imagen publicada
+        run: |
+          echo "### 🐳 Imagen construida" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | Cómo usarla |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`latest\` | \`docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`sha-${GITHUB_SHA::7}\` | \`docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}\` (inmutable, sirve para rollback) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Recordatorio: el paquete arranca privado en GHCR. Para que cualquiera" >> "$GITHUB_STEP_SUMMARY"
+          echo "pueda hacer \`docker pull\` sin autenticarse, ponelo en Public desde la" >> "$GITHUB_STEP_SUMMARY"
+          echo "pestaña **Packages** del repo." >> "$GITHUB_STEP_SUMMARY"
+
+      # ------------------------------------------------------------------
+      # Verificación opcional de que la imagen se puede BAJAR.
+      # Solo corre si definís la variable de repo `ENABLE_GHCR_PULL_CHECK`
+      # con valor `true`; si no está definida, el paso se saltea.
+      #
+      # Qué está comprobando: un `docker pull` anónimo (sin login) funciona
+      # únicamente si el paquete es PÚBLICO. Si el repo es privado, este paso
+      # falla y el mensaje dice exactamente qué hacer: o pasarlo a público, o
+      # crear un PAT con `read:packages` para el servidor.
+      # ------------------------------------------------------------------
+      - name: Verificar que la imagen se puede descargar sin login
+        if: vars.ENABLE_GHCR_PULL_CHECK == 'true'
+        run: |
+          set -euo pipefail
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          # `docker logout` asegura que el pull sea realmente anónimo: si quedara
+          # un login del paso anterior, el test daría verde con un paquete privado.
+          docker logout "${{ env.REGISTRY }}" 2>/dev/null || true
+          if docker pull "$image"; then
+            echo "::notice::$image es pública: cualquiera puede bajarla sin cuenta."
+          else
+            echo "::error::No se pudo bajar $image sin autenticarse. El paquete es privado. Opciones: (1) Packages → Change visibility → Public, o (2) crear un PAT classic con scope read:packages en el servidor y hacer docker login."
+            exit 1
+          fi
+
+      # ==================================================================
+      # ──────────────────────────────────────────────────────────────────
+      # 🔒 BLOQUE DE SECRETS — COMENTADO A PROPÓSITO
+      # ==================================================================
+      # Este workflow NO necesita secretos: el build es reproducible sin
+      # ningún secreto (el token de Apify se lee en tiempo de ejecución) y el
+      # push usa el GITHUB_TOKEN automático. Por eso el pipeline no cuesta
+      # plata: acá no hay ningún `secrets.APIFY_API_TOKEN` que se pueda
+      # disparar solo.
+      #
+      # ⚠️  SI ALGUNA VEZ DESCOMENTÁS ESTE BLOQUE, LEÉ ESTO PRIMERO
+      # El `docker run` de abajo es el ÚNICO lugar de todo el pipeline donde el
+      # token de Apify se usaría de verdad, porque es el único que levanta la
+      # app real para usuarios. Ahí, y solo ahí, tiene sentido pasarlo con
+      # `-e APIFY_API_TOKEN`. Ese `docker run` es una decisión consciente: si
+      # alguien abre la app y pulsa "Buscar en LinkedIn", se ejecuta el actor
+      # `curious_coder~linkedin-jobs-scraper` y eso se cobra. Por eso el flujo
+      # NO está automatizado hoy: se corre a mano, bajo control del owner, que
+      # es exactamente lo apropiado para una API que cuesta plata. Un
+      # deploy automático que corre en cada push convertiría cada commit en un
+      # gasto posible.
+      #
+      # Si algún día querés que ESTE workflow además despliegue la imagen en
+      # un host propio, abajo está el bloque listo para usar. Recordá:
+      #
+      #   Settings → Secrets and variables → Actions → New repository secret
+      #       APIFY_API_TOKEN   = tu token de https://console.apify.com
+      #       DOCKER_HOST        = tcp://TU_SERVIDOR:2376   (Docker remoto)
+      #       DOCKER_HOST_USER   = <usuario del servidor>
+      #       DOCKER_HOST_PASS   = <token de acceso del servidor>
+      #
+      # Paradeployar a un VPS propio, lo más simple es un runner propio
+      # (self-hosted) con `runs-on: [self-hosted, linux]`, que ya tiene Docker
+      # y acceso a la máquina, y no necesita ninguno de los DOCKER_HOST_*.
+      # ==================================================================
+      #
+      # - name: Desplegar en el servidor por SSH
+      #   env:
+      #     # El token viaja como variable de entorno del STEP, nunca como ARG
+      #     # del build: los ARG quedan grabados en el historial de la imagen.
+      #     APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+      #     IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+      #   run: |
+      #     set -euo pipefail
+      #     # Descomentar la línea siguiente y pegar la clave pública del servidor.
+      #     # (Se consigue con: ssh-keygen -y -f ~/.ssh/id_ed25519)
+      #     # echo "$SSH_PRIVATE_KEY" > /tmp/key && chmod 600 /tmp/key
+      #     # ssh -i /tmp/key "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<REMOTE
+      #     #   set -euo pipefail
+      #     #   # -d: borra el contenedor viejo y levanta el nuevo con la misma imagen.
+      #     #   # -v: el volumen con nombre es lo que hace que el historial y el
+      #     #   #     tracker de consultoras sobrevivan al redeploy.
+      #     #   docker volume create buscador-data
+      #     #   docker rm -f buscador || true
+      #     #   docker run -d --name buscador \
+      #     #     --restart unless-stopped \
+      #     #     -p 3000:3000 \
+      #     #     -e APIFY_API_TOKEN \
+      #     #     -e PORT=3000 \
+      #     #     -v buscador-data:/app/data \
+      #     #     IMAGE:latest
+      #     #   docker image prune -f
+      #     # REMOTE
+      #     echo "::notice::Desplegado."
