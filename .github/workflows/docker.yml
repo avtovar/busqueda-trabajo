@@ -82,6 +82,19 @@
 # ----------------------------------------------------------------------------
 # Pestaña Actions → "Docker" → botón "Run workflow" → rama main.
 # Sirve para reetiquetar la imagen a `latest` sin tocar código.
+#
+# ----------------------------------------------------------------------------
+# 🖥️ RUNNER Y VERSIONADO DE LAS ACTIONS (decidido el 26/09/2026, a propósito)
+# ----------------------------------------------------------------------------
+# `runs-on: ubuntu-latest` se deja así a propósito: GitHub va a migrar ese label
+# a Ubuntu 26.04 entre el 19/10 y el 19/11/2026. Lo único del SO que hace falta
+# es el binario `docker` que ya viene en el runner, así que se acepta la
+# migración en vez de pinear una imagen que en breve va a quedar atrás.
+#
+# Todas las actions están en su última major (las de `docker/*` en v4/v6/v7), que
+# ya corre sobre el runtime Node 24 y exige un Actions Runner >= v2.327.1. Los
+# runners hospedados por GitHub ya lo están, así que no hay que hacer nada.
+# Acá no hay `node-version` porque este workflow no instala Node.
 # ============================================================================
 
 name: Docker

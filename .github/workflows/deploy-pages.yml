@@ -43,6 +43,21 @@
 #       o este mismo workflow. Un cambio en server/ NO dispara Pages, porque
 #       la build de Pages no usa el backend.
 #     - Manual: pestaña Actions  →  este workflow  →  botón "Run workflow".
+#
+# ----------------------------------------------------------------------------
+# 🖥️ RUNNER Y VERSIONADO DE LAS ACTIONS (decidido el 26/09/2026, a propósito)
+# ----------------------------------------------------------------------------
+# `runs-on: ubuntu-latest` se deja así a propósito: GitHub va a migrar ese label
+# a Ubuntu 26.04 entre el 19/10 y el 19/11/2026. Acá solo se necesita Node, npm
+# y bash, así que la migración es transparente y no vale la pena pinear.
+#
+# Todas las actions están en su última major, que ya corre sobre Node 24. OJO:
+# ese Node 24 es INTERNO de cada action; el Node de tu proyecto lo sigue
+# definiendo `node-version: 20` en el `with:` de setup-node, que no se toca.
+#
+# OJO también con el par de Pages: `upload-pages-artifact` y `deploy-pages`
+# tienen que ir en el mismo major (acá v5 y v5). Si se sube solo una, el deploy
+# falla: el primero arma el artifact y el segundo lo publica.
 # ============================================================================
 
 name: Deploy Pages (UI estática)
@@ -101,7 +116,7 @@ jobs:
 
     steps:
       - name: Bajar el código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Prepara la infraestructura de Pages de la repo (artifact de
       # despliegue, rama de preview, etc.) y expone la variable
@@ -109,13 +124,13 @@ jobs:
       # el nombre con el que después se lee `steps.pages.outputs.base_path`.
       - name: Configurar Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       # Node 20 con caché de npm. La caché se ancla al lockfile DEL FRONTEND
       # (frontend/package-lock.json), no al de la raíz: son dos proyectos
       # independientes y cada uno tiene su propio árbol de dependencias.
       - name: Preparar Node 20 con caché de npm
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -198,16 +213,24 @@ jobs:
       # El workflow anterior del repo subía `path: '.'`, o sea el repo
       # ENTERO como si fuera un sitio estático: eso publicaba los logs del
       # servidor, la carpeta server/ y cualquier otra cosa presente en el
-      # working tree. Este paso sube exclusivamente la carpeta que genera
-      # Vite, que es lo único que Pages debe ver.
+      #   working tree. Este paso sube exclusivamente la carpeta que genera
+      #   Vite, que es lo único que Pages debe ver.
+      #
+      # Matiz de versión: desde `upload-pages-artifact@v4` los archivos
+      # ocultos (los que arrancan con punto) quedan EXCLUIDOS del artifact, con
+      # la opción `include-hidden-files` para revertirlos. Acá es inocuo: la
+      # build de Vite no genera dotfiles (`frontend/public` no existe).
       # ------------------------------------------------------------------
       - name: Subir el artifact de Pages
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: frontend/dist
 
       # Deploy final. `id: deployment` es lo que permite leer
       # `steps.deployment.outputs.page_url` y mostrarla en el environment.
+      # v5 va en el mismo major que el `upload-pages-artifact@v5` de arriba:
+      # los dos esperan un artifact llamado `github-pages` con el mismo
+      # formato, y ambos usan Node 24.
       - name: Desplegar en GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

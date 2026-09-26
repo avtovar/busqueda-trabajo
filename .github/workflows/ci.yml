@@ -36,6 +36,20 @@
 # bolsas de empleo públicas y gratuitas (Remotive, Arbeitnow, Himalayas,
 # RemoteOK, Jobicy). El detalle de por qué está comentado el de Apify, y cómo
 # reactivarlo si algún día conviene pagarlo, está escrito en el mismo punto.
+#
+# ----------------------------------------------------------------------------
+# 🖥️ RUNNER Y VERSIONADO DE LAS ACTIONS (decidido el 26/09/2026, a propósito)
+# ----------------------------------------------------------------------------
+# `runs-on: ubuntu-latest` se deja así a propósito: GitHub va a migrar ese label
+# a Ubuntu 26.04 entre el 19/10 y el 19/11/2026. Este pipeline no depende de la
+# versión del SO (solo necesita Node, npm, bash y curl), así que se acepta la
+# migración automática en vez de pinarla y quedar anclado a una imagen que en
+# pocos meses ya es la anterior.
+#
+# Todas las actions de abajo están en su última major (v7), que es la que corre
+# sobre el runtime Node 24. OJO: ese Node 24 es INTERNO de la action (el script
+# que la implementa). El Node de TU proyecto lo define `node-version: 20` en los
+# `with:` de setup-node, y eso no se toca acá: son dos cosas distintas.
 # ============================================================================
 
 name: CI
@@ -91,7 +105,7 @@ jobs:
 
     steps:
       - name: Bajar el código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ------------------------------------------------------------------
       # 1.1 Sintaxis de TODO el backend.
@@ -133,7 +147,7 @@ jobs:
       # pasa de ~40 s a ~5 s.
       # ------------------------------------------------------------------
       - name: Instalar dependencias del frontend (npm ci, con caché)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -396,7 +410,7 @@ jobs:
       - name: Subir el log del servidor si el smoke test falló
         # Solo se sube cuando algo falló, para no gastar espacio en runnings OK.
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-smoke-log
           path: /tmp/server.log
@@ -415,21 +429,21 @@ jobs:
 
     steps:
       - name: Bajar el código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ------------------------------------------------------------------
       # 2.1 Cache de npm para los dos proyectos, con dos claves distintas
       # porque son dos lockfiles distintos.
       # ------------------------------------------------------------------
       - name: Preparar caché de npm (raíz)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Preparar caché de npm (frontend)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
