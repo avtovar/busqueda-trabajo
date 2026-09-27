@@ -50,8 +50,17 @@ open_browser() {
     # ↑ Git Bash / MSYS / Cygwin sobre Windows: no existe xdg-open, así que se le pide
     #   a Windows que abra la URL. El >/dev/null 2>&1 || true silencia el error porque
     #   en un entorno sin escritorio tampoco es grave: al final solo se trata de abrir la URL.
+    # ↑ OJO TRAMPA, no lo "simplifiques": MSYS2 (la base de Git Bash) convierte a rutas
+    #   de Windows todo argumento que empiece con "/", porque para un POSIX todo /algo es
+    #   una ruta. Por eso el "/c" de `cmd.exe /c start` le llega a Windows como "C:/".
+    #   Con ese C:/ en vez del /c, cmd.exe ya no ejecuta "start": abre una consola
+    #   interactiva esperando que le escribas algo y se queda ahí para siempre, arrastrando
+    #   a este script, que se cuelga en esta línea y jamás muestra el "página abierta".
+    #   MSYS_NO_PATHCONV=1 desactiva esa conversión SOLO para este comando. Ojo: es un
+    #   prefijo de asignación de entorno (una variable_assignment), no una subshell, así que
+    #   el set -e de arriba sigue intacto. Donde no haya MSYS la variable no hace nada.
     MINGW*|MSYS*|CYGWIN*)
-      cmd.exe /c start "" "$APP_URL" >/dev/null 2>&1 || true
+      MSYS_NO_PATHCONV=1 cmd.exe /c start "" "$APP_URL" >/dev/null 2>&1 || true
       ;;
     Linux*)
       # ↑ OJO TRAMPA: en WSL uname -s también dice "Linux", pero el navegador vive en
@@ -59,7 +68,10 @@ open_browser() {
       #   "microsoft" (es la huella que deja WSL). -i = ignora mayúsculas, -q = sin salir
       #   con código de error si no encuentra nada.
       if grep -qi microsoft /proc/version 2>/dev/null; then
-        cmd.exe /c start "" "$APP_URL" >/dev/null 2>&1 || true
+        # ↑ Misma trampa y mismo arreglo que en la rama de arriba: el prefijo
+        #   MSYS_NO_PATHCONV=1 evita que el "/c" llegue convertido en "C:/" y que el
+        #   script termine esperando una consola de cmd.exe que nunca vuelve.
+        MSYS_NO_PATHCONV=1 cmd.exe /c start "" "$APP_URL" >/dev/null 2>&1 || true
       elif command -v xdg-open >/dev/null 2>&1; then
         # ↑ Linux de verdad: xdg-open es el estándar para abrir direcciones web.
         xdg-open "$APP_URL" >/dev/null 2>&1 || true
