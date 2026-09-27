@@ -104,7 +104,20 @@ async function getRanked(force = false) {
   const now = Date.now();
   // ↑ Si la caché es reciente y no pedimos refresco, devolvemos lo ya guardado
   if (!force && cache.data && now - cache.at < TTL) return cache.data;
-  if (refreshing) return refreshing; // ya hay un refresh en curso, esperalo
+  if (refreshing) {
+    // ↑ Sin force: se reusa el refresh en curso, así 2 clicks no pegan 2 veces a las APIs
+    if (!force) return refreshing;
+    // ↑ Con force (botón "Actualizar búsqueda") NO se hace trampa: se espera a que
+    //   termine el refresh en vuelo y DESPUÉS arranca la búsqueda nueva, si no el
+    //   botón no actualizaba nada cuando ya había una carga automática corriendo
+    try {
+      await refreshing;
+    } catch {
+      // si el refresh en vuelo falló, da igual: abajo se arranca el forzado
+    } finally {
+      refreshing = null;
+    }
+  }
   // ↑ Inicia el refresco como una promesa compartida (todos esperan el mismo)
   refreshing = (async () => {
     let jobs = [];

@@ -243,7 +243,7 @@ export default function App() {
       return `${jobsData.jobs.length} ofertas de LinkedIn, filtradas a los últimos 30 días.`;
     }
     if (viewMode === 'history') {
-      return `Historial desde 01/01/2026 · ${(jobsData.jobs || []).length} ofertas · sin vencimiento por días. “No aparece” no confirma cobertura.`;
+      return `Historial de los últimos 6 meses · ${(jobsData.jobs || []).length} ofertas · las más viejas se purgan solas. “No aparece” no confirma cobertura.`;
     }
     return jobsData._online
       ? 'Conexión exitosa con las fuentes de empleo.'
