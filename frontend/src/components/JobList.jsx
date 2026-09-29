@@ -2,7 +2,13 @@ import { useState } from 'react';
 // ↑ Hook useState: la paginación necesita memoria interna (en qué página estamos).
 
 import { matchClass, daysAgo, formatDisplayDate } from '../utils.js';
-// ↑ Helpers: matchClass (color del % de match) y daysAgo (días desde la última vista).
+// ↑ Helpers: matchClass (color del % de match), daysAgo (días desde la última vista)
+//   y formatDisplayDate (fecha legible).
+import LanguageBadge from './LanguageBadge.jsx';
+// ↑ La etiqueta de idioma (ES/EN). Va en un componente aparte y no en línea acá
+//   porque la misma etiqueta se dibuja también en el modal de detalle: si el
+//   <span> estuviera duplicado en los dos archivos, cualquier cambio futuro
+//   (un texto, un estilo) se olvidaría de actualizar uno de los dos.
 
 // ============================================================================
 // Componente de la lista de ofertas de UNA región.
@@ -110,14 +116,17 @@ function HistoryBadge({ job }) {
 }
 
 // Lista de ofertas de la región: recibe jobs, el modo de vista y el callback onOpen.
-export default function JobList({ jobs, viewMode, onOpen }) {
+export default function JobList({ jobs, viewMode, minScore, onOpen }) {
   // ↑ Props desestructurados. onOpen viene del padre: se ejecuta al clickear una card.
   // Las props son los DATOS que viajan de arriba hacia abajo (de App.jsx hacia acá),
   // como un paquete: este componente no busca nada, solo dibuja lo que le pasaron.
-  //   jobs     = array de ofertas de la región (puede venir vacío).
+  //   jobs     = array de ofertas YA filtrado por el padre (puede venir vacío).
   //   viewMode = 'live' (resultados de la última búsqueda) o 'history' (historial).
+  //   minScore = % de match mínimo que aplicó el padre. Solo se usa para poder
+  //              explicar el mensaje de lista vacía (no para filtrar de nuevo).
   //   onOpen   = función del padre que se llama con el id de la oferta clickeada.
-  // El padre los pasa en App.jsx: <JobList jobs={...} viewMode={viewMode} onOpen={openDetail} />
+  // El padre los pasa en App.jsx:
+  // <JobList jobs={visibleJobs} viewMode={viewMode} minScore={minScore} onOpen={openDetail} />
 
   const [page, setPage] = useState(1);
   // ↑ Estado interno de paginación: empieza en la página 1. No le importa al padre.
@@ -162,13 +171,18 @@ export default function JobList({ jobs, viewMode, onOpen }) {
   if (!jobs.length) {
     // ↑ "Return temprano": si no hay nada que mostrar, salimos acá y ni siquiera
     //   llegamos a calcular la paginación ni a dibujar las tarjetas.
+    // El mensaje depende de DOS cosas: si hay un filtro de % activo y de qué vista
+    // se está mirando. Si el filtro fue el que vació la lista, decir "no se
+    // encontraron ofertas" sería mentira: las hay, solo que ninguna pasa el % pedido.
+    const emptyMessage = minScore > 0
+      ? `Ninguna oferta llega al ${minScore}% de match. Bajá el filtro en la barra de arriba para ver el resto.`
+      : viewMode === 'history'
+        ? 'Todavía no hay historial guardado para esta región. Corré una búsqueda primero.'
+        : 'No se encontraron ofertas para esta región.';
+
     return (
-      <div className="empty">
-        {viewMode === 'history'
-          ? 'Todavía no hay historial guardado para esta región. Corré una búsqueda primero.'
-          : 'No se encontraron ofertas para esta región.'}
-        {/* ↑ Ternario dentro del JSX: el mensaje depende del modo de visualización. */}
-      </div>
+      <div className="empty">{emptyMessage}</div>
+      // ↑ El texto se arma antes del return para no anidar tres ternarios en el JSX.
     );
   }
 
@@ -265,6 +279,11 @@ export default function JobList({ jobs, viewMode, onOpen }) {
                     {/* ↑ Título y empresa, y de dónde salió la oferta (LinkedIn,
                         Apify, curada a mano, etc.). */}
                   </div>
+                  <LanguageBadge job={job} />
+                  {/* ↑ La etiqueta de idioma va PEGADA al pill del % de match (y
+                      separada de él, no adentro): el idioma y el match son dos datos
+                      distintos. El margin-left:auto de la clase la empuja a la
+                      derecha para que las dos queden siempre juntas. */}
                   <span className={`match-pill ${matchClass(job.score)}`}>{job.score}%</span>
                   {/* ↑ El pill del % de match: template string para meter la clase
                       que devuelve matchClass() (verde/amarillo/rojo) + el número. */}

@@ -21,13 +21,14 @@ Sistema web para encontrar las mejores ofertas de empleo QA adaptadas al CV de *
 - `frontend/src/main.jsx` — Punto de entrada de React: renderiza `App` dentro de `#root`.
 - `frontend/src/App.jsx` — Componente raíz: maneja estado global (región, vista live/historial, modales) y orquesta todas las secciones.
 - `frontend/src/api.js` — Capa de acceso a la API del backend, con datos de respaldo si el server está caído.
-- `frontend/src/utils.js` — Helpers puros: color del match, días desde una fecha, URL de búsqueda LinkedIn, clases por categoría.
-- `frontend/src/styles.css` — Todos los estilos de la app (tema oscuro, cards, modales, análisis, responsive).
+- `frontend/src/utils.js` — Helpers puros: color del match, **detección de idioma (castellano/inglés) de cada oferta a partir de su texto, con caché por id**, días desde una fecha, URL de búsqueda LinkedIn, clases por categoría.
+- `frontend/src/styles.css` — Todos los estilos de la app (tema oscuro, cards, modales, etiqueta de idioma, análisis, responsive).
 - `frontend/src/components/CvPanel.jsx` — Panel lateral con el CV de Ali (avatar, sobre mí, skills, enlaces).
 - `frontend/src/components/RegionTabs.jsx` — Pestañas de región (países + Propuesta de Interés + Consultoras).
-- `frontend/src/components/Toolbar.jsx` — Barra de acciones: actualizar búsqueda, alternar historial, buscar en LinkedIn.
-- `frontend/src/components/JobList.jsx` — Lista de tarjetas de oferta con paginación y badge de historial.
-- `frontend/src/components/JobDetailModal.jsx` — Modal de detalle de una oferta: resumen, skills, descripción, copiar CV, generar carta.
+- `frontend/src/components/Toolbar.jsx` — Barra de acciones: actualizar búsqueda, alternar historial, buscar en LinkedIn y filtrar por % de match mínimo (presets 0/25/50/100 + valor a medida de 80 a 100, que queda guardado en el navegador).
+- `frontend/src/components/LanguageBadge.jsx` — Etiqueta informativa "ES"/"EN" con el idioma detectado de la oferta. Es un `<span>` (no un botón): no filtra ni hace nada, y si la confianza es baja se atenúa.
+- `frontend/src/components/JobList.jsx` — Lista de tarjetas de oferta con paginación, badge de historial y la etiqueta de idioma junto al % de match.
+- `frontend/src/components/JobDetailModal.jsx` — Modal de detalle de una oferta: resumen, skills, descripción, etiqueta de idioma, copiar CV, generar carta.
 - `frontend/src/components/LetterModal.jsx` — Modal que muestra la carta de presentación generada y permite copiarla/descargarla.
 - `frontend/src/components/ConsultorasList.jsx` — Lista de consultoras QA con filtro por categoría y tracker de contacto.
 - `frontend/src/components/AnalysisPage.jsx` — Página "Propuesta de Interés": gráficos de barras, brechas, fortalezas y recomendaciones.

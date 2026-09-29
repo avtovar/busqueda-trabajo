@@ -3,6 +3,12 @@ import { useState } from 'react';
 
 import { matchClass, linkedinSearchUrl } from '../utils.js';
 // ↑ matchClass (color del % de match) y linkedinSearchUrl (buscar la oferta en LinkedIn).
+import LanguageBadge from './LanguageBadge.jsx';
+// ↑ La MISMA etiqueta de idioma (ES/EN) que se ve en la tarjeta de la lista. Se
+//   importa del componente compartido y no se re-dibuja acá para que las dos
+//   vistas no se desincronicen. Va también en este modal porque es ACÁ donde el
+//   usuario lee la descripción larga de la oferta, y desde ahí ve si tiene que
+//   empezar a leer en inglés o en castellano.
 
 // Copia texto al portapapeles usando la API moderna del navegador, o un fallback.
 function copyText(txt) {
@@ -53,6 +59,12 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
 
   // Idiomas: en Europa y EE.UU. la UI se muestra en inglés.
   const langIsEn = region === 'europa' || region === 'eeuu';
+  // ↑ OJO con el nombre: 'langIsEn' es el idioma de la INTERFAZ (el texto de los
+  //   botones de abajo), elegido por región. NO tiene nada que ver con el idioma
+  //   de la OFERTA, que es otro dato distinto y va aparte en <LanguageBadge/>.
+  //   Son dos "idiomas" que casualmente se llaman parecido, así que no se mezclan.
+  //   La clave de la región es exactamente 'eeuu' (con dos 'e'), como está
+  //   definido en RegionTabs.jsx y en REGION_LOCATION de utils.js.
 
   const wanted = s.requiredSkills || [];
   // ↑ Skills que pide la oferta y que Ali ya tiene.
@@ -113,6 +125,11 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
           {job.modality && <span className="chip">🕒 {job.modality}</span>}
           {/* ↑ Modalidad del puesto (full time, home office, híbrido X días) si viene en el empleo. */}
           <span className="chip">{job.source}</span>
+          <LanguageBadge job={job} />
+          {/* ↑ La etiqueta de idioma va JUNTO al pill de "Match X%", no adentro:
+              el idioma de la oferta y el % de match son dos datos distintos y
+              meter uno dentro del otro haría que pareciera que el % mide el
+              idioma. Es puramente informativa (un <span>, no un botón). */}
           <span className={`chip match-pill ${matchClass(job.score)}`}>Match {job.score}%</span>
           {/* ↑ El pill del match usa matchClass para su color (verde/amarillo/rojo). */}
         </div>

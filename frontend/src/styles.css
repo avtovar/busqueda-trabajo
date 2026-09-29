@@ -4,8 +4,9 @@
    ¿Qué contiene? Todo el tema visual del frontend:
    - Variables CSS del tema oscuro (colores, radios, sombras).
    - Layout de la app: header, panel del CV y panel de ofertas.
-   - Pestañas de región, toolbar, historial, consultoras QA, tarjetas de oferta,
-     modales, carta de presentación y página de análisis "Propuesta de Interés".
+   - Pestañas de región, toolbar (con el filtro de % de match mínimo), historial,
+     consultoras QA, tarjetas de oferta, modales, carta de presentación y página
+     de análisis "Propuesta de Interés".
    - Una media query para que en pantallas chicas la grilla se apile.
    ¿Dónde se importa? En main.jsx: `import './styles.css'`. Por eso aplica a
    TODOS los componentes, sin necesidad de clases especiales por archivo.
@@ -146,6 +147,39 @@ body {
 .btn:disabled { opacity: 0.6; cursor: default; transform: none; box-shadow: none; filter: none; }
 /* ↑ Un botón deshabilitado (ej. "Actualizando…") no debe levantarse ni brillar al hover. */
 
+/* ----- Filtro de "% de match mínimo" (presets 0/25/50/100 + campo 80-100) ----- */
+.score-filter {
+  /* ↑ `flex: 1 0 100%` le pide al toolbar (que es flex con wrap) ocupar TODO el
+     ancho: por eso el filtro siempre cae en una línea nueva debajo de los
+     botones, sin tener que agregar un contenedor extra en el JSX. */
+  flex: 1 0 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+}
+.score-filter-label { font-size: 0.82rem; color: var(--muted); }
+/* ↑ Mismo tono y tamaño que el label del "Ordenar por" de la lista de ofertas. */
+.score-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+/* ↑ Grupo de los cuatro presets: mismo display que .toolbar-actions, para que los
+   botones queden prolijos y con el mismo gap de 8px. */
+.score-filter-input {
+  /* ↑ Estilo calcado del select de orden (.job-sort-select): mismo fondo, borde y
+     radio, así el campo no parece un control de otro lado de la app. */
+  width: 72px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg2); color: var(--text); font: inherit; font-size: 0.8rem;
+}
+.score-filter-input.custom {
+  /* ↑ Modo "a medida": el campo se pinta con el color de acento y en negrita, para
+     que se distinga de un preset encendido (que se pinta con el degradado). Los
+     dos modos son excluyentes: nunca hay un preset y un custom activos a la vez.
+     Se usan variables del tema, así el acento funciona igual en claro y oscuro. */
+  border-color: var(--accent); color: var(--accent); font-weight: 700;
+}
+.score-filter-input:focus-visible { outline: 3px solid var(--accent2); outline-offset: 2px; }
+/* ↑ Accesibilidad: aro de foco visible, como en el resto de los controles. */
+.score-filter-hint { font-size: 0.74rem; color: var(--muted); }
+/* ↑ Texto de ayuda o de error al lado del campo. */
+.score-filter-hint.error { color: var(--red); }
+/* ↑ El error se pinta con el rojo semántico del tema (--red), no con un color fijo,
+   así se lee igual de bien en modo claro y en modo oscuro. */
+
 /* ----- Historial desde enero 2026 ----- */
 .job-history { margin-top: 8px; }
 .badge { display: inline-block; font-size: 0.72rem; padding: 3px 9px; border-radius: 20px; }
@@ -209,6 +243,38 @@ body {
 .match-high { background: rgba(34, 197, 94, 0.2); color: var(--green); }
 .match-mid { background: rgba(234, 179, 8, 0.2); color: var(--yellow); }
 .match-low { background: rgba(239, 68, 68, 0.2); color: var(--red); }
+
+/* Etiqueta de idioma (ES / EN) detectada del texto de la oferta: es PURAMENTE
+   informativa, no filtra ni hace nada. Por eso se ve como una "chiapa" neutra
+   (borde + texto atenuado del tema) y NO como un botón: sin cursor:pointer, sin
+   estado hover y sin tabindex, para que nadie piense que se puede clickear. */
+.lang-badge {
+  display: inline-block; flex-shrink: 0;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em;
+  padding: 3px 9px; border-radius: 20px; white-space: nowrap;
+  background: var(--bg); color: var(--muted); border: 1px solid var(--border);
+  /* ↑ Todos los colores salen de variables del tema: la misma chiapa se ve bien
+     en modo claro y en modo oscuro sin tener dos reglas distintas. */
+}
+.job-card .lang-badge { margin-left: auto; }
+/* ↑ En la tarjeta el .job-top es flex con space-between, así que este margen
+   empuja la etiqueta pegada al pill de % de match y las dos quedan siempre
+   juntas, a la derecha. En el modal NO se aplica: ahí la etiqueta fluye sola
+   dentro del .detail-meta, que ya es flex-wrap. */
+.lang-badge-weak { opacity: 0.62; border-style: dashed; }
+/* ↑ Confianza baja (poco texto para decidir, o texto que parece estar en otro
+   idioma): se ATENÚA y el borde pasa a punteado, para que se lea como
+   "estimado" y no como una dato firme. La opacidad baja el contraste justamente
+   para marcar esa duda sin inventar un tercer estado de idioma. */
+
+/* Texto solo para lectores de pantalla: invisible a la vista, se lee igual.
+   Es el patrón estándar de accesibilidad (WCAG 2.1 - 1.3.1 / 4.1.2): el chip
+   muestra "ES" a la vista pero un lector de pantalla anuncia "ES (castellano)". */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
 
 .job-card .job-meta { display: flex; gap: 12px; margin-top: 8px; font-size: 0.8rem; color: var(--muted); flex-wrap: wrap; }
 .job-card .job-skill-preview { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }

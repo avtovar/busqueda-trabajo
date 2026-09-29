@@ -23,6 +23,298 @@ export function matchClass(score) {
   return 'match-low';
 }
 
+// ============================================================================
+// DETECCIÓN DE IDIOMA DE LA OFERTA (castellano / inglés)
+// ============================================================================
+// ¿POR QUÉ SE CALCULA EN EL NAVEGADOR Y NO EN EL SERVIDOR?
+//  1) Las ~220 ofertas ya guardadas en data/history.json NO traen ningún campo de
+//     idioma, y no lo van a traer sin volver a scrapear (cada corrida gasta créditos
+//     de Apify). Si el cálculo fuera del server, las ofertas viejas quedarían sin
+//     etiqueta para siempre; en el cliente se detectan al instante, sin gastar nada.
+//  2) El filtro de "% de match mínimo" que se agregó hace poco también es 100%
+//     cliente, así queda consistente: las dos features de la tarjeta se calculan igual.
+//  3) Funciona al instante sobre búsqueda en vivo, historial y datos demo.
+// Restricciones que esto impone (y por eso el código es como es):
+//  - PURA: no toca la red, no muta lo que recibe, ni timers. Lo único que guarda
+//    estado es el Map de caché de más abajo, y solo como memoización.
+//  - SOLO palabras funcionales en ASCII: los datos vienen con "mojibake"
+//    (se ven así: "Automatizaci�n", "an�alista", "t cnico"), o sea que los
+//    caracteres acentuados llegan ROTOS. Un diccionario con acentos fallaría en
+//    silencio, así que acá no se usa ni uno.
+//  - SIN jerga técnica: "QA", "SDET", "Automation", "Engineer", "Test", "Senior",
+//    "Selenium"... son las MISMAS palabras en castellano y en inglés, así que no
+//    sirven para distinguir nada. Lo que sí distingue son las palabras funcionales.
+// ============================================================================
+
+export const LANG_SHORT = { es: 'ES', en: 'EN' };
+// ↑ 'ES' / 'EN' son las DOS ÚNICAS etiquetas que se muestran. No se agrega un tercer
+//   estado (tipo "otro idioma") porque el usuario pidió solo castellano e inglés.
+export const LANG_NAME = { es: 'castellano', en: 'inglés' };
+// ↑ La palabra entera, que va en el tooltip y en el texto que leen los lectores de
+//   pantalla: en la tarjeta corta alcanza con "ES", pero al leerlo en voz alta o al
+//   pasar el mouse tiene que decir "castellano" y no una sigla.
+
+export const LANG_LOW_CONFIDENCE = 0.35;
+// ↑ Por debajo de este valor la detections se marca como "dudosa" y la interfaz la
+//   atenúa. El número no es arbitrario: con la fórmula de abajo la confianza es
+//   (diferencia entre idiomas / total de señales) × (cuánta evidencia hay). Confianza
+//   plena necesita ~6 palabras funcionales coincidentes en el texto; con menos de
+//   eso no hay base para asegura nada, así que se atenúa a propósito.
+
+const LANG_MIN_EVIDENCE = 6;
+// ↑ Cantidad de señales (ya ponderadas) a partir de la cual la confianza vale 1.
+//   6 es un valor conservador: por debajo, una sola palabra suelta decide el idioma
+//   y no es confiable.
+const DESCRIPTION_WEIGHT = 0.7;
+const TITLE_WEIGHT = 0.3;
+// ↑ La descripción pesa 70% y el título 30%. Motivo documentado: hay títulos
+//   REALES bilingües, por ejemplo
+//   "Ingeniero de Automatización de Pruebas / Test Automation Engineer" (Peraton),
+//   donde el título trae palabras de los dos idiomas y la descripción es la que de
+//   verdad dice en qué idioma está escrita la oferta.
+const TIE_MARGIN = 0.05;
+// ↑ Diferencia de puntaje (normalizada) que se considera empate. Ver la regla de
+//   desempate completa en detectJobLanguage().
+const FOREIGN_CONFIDENCE_CAP = 0.3;
+// ↑ Tope de confianza cuando el texto parece estar en un idioma que NO es es/en
+//   (alemán, francés, portugués...). Ver FOREIGN_WORDS más abajo.
+
+const ES_FUNCTION_WORDS = new Set([
+  // Artículos, preposiciones y pronombres: aparecen en cada renglón de un texto en
+  // castellano y ninguno de ellos existe como palabra en inglés.
+  'de', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'en', 'para', 'con',
+  'sin', 'sobre', 'que', 'se', 'del', 'al', 'por', 'como', 'su', 'sus', 'lo', 'nos',
+  'nuestro', 'nuestra', 'nuestros', 'nuestras', 'cada', 'son', 'tiene', 'tienen',
+  'hace', 'hacer', 'hemos', 'somos', 'usted', 'ustedes',
+  // Verbos y sustantivos típicos de un aviso de empleo en castellano.
+  'empresa', 'buscar', 'buscamos', 'busca', 'buscando', 'trabajo', 'trabaja',
+  'trabajar', 'trabajamos', 'experiencia', 'experiencias', 'requerida', 'requerido',
+  'requeridos', 'requerimos', 'requiere', 'requisito', 'requisitos',
+  'responsabilidades', 'funciones', 'tareas', 'actividades', 'oportunidad',
+  'oportunidades', 'puesto', 'puestos', 'vacante', 'vacantes', 'candidato',
+  'candidatos', 'personas', 'cliente', 'clientes', 'excluyente', 'deseable',
+  'deseables', 'indispensable', 'preferible', 'sueldo', 'salario', 'jornada',
+  'turno', 'turnos', 'beneficios', 'remoto', 'remota', 'presencial', 'mediante',
+  'ofrecemos', 'enviar', 'postular', 'postula', 'cv',
+  // ↑ 'cv' son 2 letras y NO existe como palabra en inglés; en las ofertas
+  //   hispanas es de las palabras que más veces se repite ("enviar CV", "su CV").
+  //   OJO: 'es' (verbo ser) quedó FUERA a propósito: aparece en URLs y en
+  //   Siglas tipo "es.linkedin.com", y un falso positivo de esos no vale la pena.
+]);
+// ↑ Se arman con new Set() para que la búsqueda sea O(1) en vez de recorrer un
+//   array con .includes() por cada token de cada oferta.
+
+const EN_FUNCTION_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'you', 'your', 'yours', 'our', 'we', 'us', 'are',
+  'was', 'were', 'be', 'is', 'will', 'would', 'should', 'could', 'shall', 'may',
+  'must', 'this', 'that', 'these', 'those', 'from', 'have', 'has', 'had', 'not',
+  'all', 'any', 'who', 'what', 'when', 'where', 'which', 'while', 'about', 'into',
+  'over', 'under', 'of', 'to', 'in', 'on', 'at', 'an', 'as', 'by', 'or', 'if',
+  'it', 'its', 'they', 'them', 'their', 'there', 'than', 'then', 'also', 'can',
+  // Verbos y sustantivos típicos de un job post en inglés.
+  'job', 'jobs', 'work', 'works', 'working', 'experience', 'experienced',
+  'required', 'require', 'requires', 'requiring', 'apply', 'applicant', 'company',
+  'companies', 'team', 'teams', 'role', 'roles', 'position', 'positions',
+  'responsibilities', 'responsibility', 'qualifications', 'requirements', 'years',
+  'skills', 'skill', 'including', 'include', 'includes', 'candidate', 'candidates',
+  'opportunity', 'opportunities', 'location', 'salary', 'benefits', 'employment',
+  'duties', 'please', 'send', 'resume', 'ability', 'offer', 'offers', 'time',
+  // ↑ 'no', 'one', 'full', 'part', 'other', 'like', 'work' y otros que SÍ existen
+  //   en castellano ('no', 'uno', 'todo', 'parte', 'otro', 'como') quedaron FUERA a
+  //   propósito: son palabras compartidas y no distinguen nada.
+]);
+
+// Palabras funcionales de idiomas que el proyecto NO tiene que mostrar (alemán,
+// francés, portugués, italiano). NO se usan para cambiar la etiqueta: solo para
+// BAJAR la confianza, porque el usuario pidió solo dos idiomas y una oferta en
+// alemán tiene que salir como "estimado", no como un "castellano" con toda
+// seguridad. Son todas ASCII y ninguna aparece en las dos listas de arriba
+// (o sea: ninguna es ambigua entre castellano/inglés), por eso sirven de alarma.
+// Se pueden escribir con y sin acento porque la limpieza de diacríticos (NFD) de
+// más abajo convierte "für" en "fur" y "não" en "nao" automáticamente.
+const FOREIGN_WORDS = new Set([
+  // Alemán
+  'und', 'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einer',
+  'ist', 'sind', 'wir', 'du', 'dich', 'dein', 'ihre', 'mit', 'von', 'zum', 'zur',
+  'sich', 'nicht', 'auch', 'werden', 'durch', 'sowie', 'dass', 'haben', 'sein',
+  'oder', 'aber', 'wenn', 'unser', 'unsere', 'eure', 'werdet', 'bei', 'aus', 'euch',
+  'fur', 'uber', 'dich', 'mochtest', 'werden',
+  // Francés
+  'est', 'sont', 'une', 'dans', 'avec', 'vous', 'votre', 'cette', 'aux', 'notre',
+  'ainsi', 'leur', 'tout', 'toute', 'nous', 'des', 'du', 'et', 'sur', 'qui', 'quoi',
+  'dont', 'aussi', 'etre', 'elle', 'elles',
+  // Portugués
+  'voce', 'nao', 'sao', 'seu', 'sua', 'uma', 'atende', 'vagas', 'atualizada',
+  // Italiano
+  'sono', 'della', 'delle', 'nella', 'nel',
+]);
+
+// Limpia el texto antes de contar palabras: le saca el HTML, las URLs y los
+// correos, y después pasa todo a minúsculas sin tildes ni signos.
+// ↑ Por qué: las descripciones vienen con HTML (<p>, <li>, <strong>…) y con URLs.
+//   Si no los sacáramos, "es" de "https://es.linkedin.com" y "in" de
+//   "https://lnkd.in/xyz" se contarían como palabras del castellano/inglés y
+//   falsearían el resultado. También se borran las entidades (&amp;, &nbsp;).
+function cleanLangText(value) {
+  if (typeof value !== 'string' || !value) return '';
+  // ↑ Sin descripción (undefined, null, "") devuelve texto vacío y listo: el
+  //   detector después decide con el título, que es el caso borde pedido.
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\S+@\S+/g, ' ')
+    .replace(/&\w{2,8};/g, ' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    // ↑ normalize('NFD') separa "á" en "a" + un carácter combinante invisible;
+    //   este replace borra esos caracteres combinantes y deja la letra pelada.
+    .replace(/[^a-z0-9]+/g, ' ');
+    // ↑ Cualquier corrida que no sea letra o número (puntuación, %, +, /) pasa a
+    //   ser un espacio: así "C++", "QA/SDET" o "(m/w/d)" se parten en tokens.
+}
+
+// Cuenta cuántas palabras funcionales de cada idioma hay en un texto.
+// ↑ Devuelve TRES números: cuántas señales de castellano, cuántas de inglés y
+//   cuántas de "otro idioma" (para la alarma de confianza). No hace falta el total
+//   de tokens: la evidencia se mide sobre las señales, no sobre el largo del texto.
+function countLangSignals(value) {
+  const esWords = ES_FUNCTION_WORDS;
+  const enWords = EN_FUNCTION_WORDS;
+  let es = 0;
+  let en = 0;
+  let foreign = 0;
+  for (const token of cleanLangText(value).split(' ')) {
+    if (token.length < 2 || /^\d+$/.test(token)) continue;
+    // ↑ Se descartan los tokens de 1 carácter y los que son solo números: son
+    //   ruido (letras sueltas de etiquetas HTML, años, cantidades, "(m/w/d)").
+    if (esWords.has(token)) es += 1;
+    else if (enWords.has(token)) en += 1;
+    else if (FOREIGN_WORDS.has(token)) foreign += 1;
+  }
+  return { es, en, foreign };
+}
+
+// ¿En qué idioma está escrita la oferta? Devuelve SIEMPRE un idioma ('es' o 'en'),
+// pero además devuelve cuán segura está esa respuesta, para que la interfaz
+// pueda atenuar los casos dudosos en vez de mentir con una certeza falsa.
+// ↑ Es la función que usan la tarjeta (JobList) y el modal (JobDetailModal).
+export function detectJobLanguage(job) {
+  const source = job || {};
+  // ↑ Si no llega ninguna oferta, se trabaja con un objeto vacío: la función
+  //   nunca tira, así un dato raro no rompe el render de la lista.
+
+  const desc = countLangSignals(source.description);
+  const title = countLangSignals(source.title);
+  // ↑ Se cuentan por separado para poder PONDERARlos distinto: la descripción vale
+  //   70% y el título 30% (ver DESCRIPTION_WEIGHT / TITLE_WEIGHT arriba).
+
+  const es = desc.es * DESCRIPTION_WEIGHT + title.es * TITLE_WEIGHT;
+  const en = desc.en * DESCRIPTION_WEIGHT + title.en * TITLE_WEIGHT;
+  const foreign = desc.foreign + title.foreign;
+  // ↑ Señales de "otro idioma". No eligen el idioma (el usuario pidió solo es/en),
+  //   solo sirven para bajar la confianza si llegan a dominar el texto.
+  const total = es + en;
+  // ↑ "total" es la cantidad de evidencia acumulada, ya ponderada.
+
+  const margin = total > 0 ? (es - en) / total : 0;
+  // ↑ El margen va de -1 (todo inglés) a +1 (todo castellano) pasando por 0
+  //   (empate). Es un número entre -1 y 1 y no depende del largo del texto, así
+  //   una descripción gigante no "pesa" más que una corta: pesa lo mismo.
+
+  // ---- REGLA DE DESEMPATE (documentada a propósito) ----
+  // Cuando el margen es ~0 no hay ganador, así que se desempata en este orden:
+  //   1) el idioma con más señales en la DESCRIPCIÓN (que es la parte que manda),
+  //   2) si ahí también hay empate, el que tenga más señales en el TÍTULO,
+  //   3) si tampoco, castellano, que es el idioma de la propia interfaz: entre las
+  //      dos opciones es la menos sorprendente para el usuario que está mirando.
+  // ↓
+  let lang = margin > 0 ? 'es' : 'en';
+  if (Math.abs(margin) <= TIE_MARGIN) {
+    if (desc.es !== desc.en) lang = desc.es > desc.en ? 'es' : 'en';
+    else if (title.es !== title.en) lang = title.es > title.en ? 'es' : 'en';
+    else lang = 'es';
+  }
+
+  // ---- CONFIANZA ----
+  // Es (cuánta diferencia hubo) × (cuánta evidencia hubo). Los dos factores hacen
+  // falta: con 1 sola palabra suelta la diferencia es total (margen 1) pero la
+  // evidencia es nula, y decir "ES" con toda seguridad ahí sería mentira.
+  let confidence = Math.abs(margin) * Math.min(1, total / LANG_MIN_EVIDENCE);
+  if (total === 0) confidence = 0;
+  // ↑ Sin ni una palabra funcional (ej. el título pelado "QA Automation Engineer")
+  //   no hay nada que decidir: se devuelve el idioma de la interfaz pero con
+  //   confianza 0, y la interfaz lo muestra atenuado diciendo que es una estimación.
+  if (foreign > Math.max(es, en)) confidence = Math.min(confidence, FOREIGN_CONFIDENCE_CAP);
+  // ↑ Si el texto está claramente en un idioma que NO es es/en, la confianza se
+  //   topa (no se cambia la etiqueta: el usuario pidió solo estos dos idiomas) y
+  //   la interfaz lo muestra atenuado. Germanas como "Testingenieur:in ..." o
+  //   "Werkstudent (m/w/d)" caen acá: es una aproximación, no una traducción.
+
+  return {
+    lang,
+    confidence,
+    weak: confidence < LANG_LOW_CONFIDENCE,
+    // ↑ 'weak' ya viene calculado con el umbral, así los dos componentes que
+    //   muestran la etiqueta no reimplementan la regla.
+    source: desc.es + desc.en > 0 ? 'descripcion' : 'titulo',
+    // ↑ De dónde salió la decisión, para poder explicarlo si hay que medir.
+  };
+}
+
+const langCache = new Map();
+// ↑ CACHÉ DE RESULTADOS. Por qué hace falta: JobList se vuelve a dibujar en cada
+//   cambio de tema, al abrir/cerrar el modal, al cambiar de página y al ordenar.
+//   Sin caché, cada dibujado volvería a limpiar y tokenizar las ~220 descripciones
+//   largas del historial: trabajo puro de CPU repetido muchas veces por segundo.
+//   Solo se escribe desde acá, es privado del módulo, así que es seguro.
+const LANG_CACHE_MAX = 2000;
+// ↑ Techo de seguridad: si algún día se acumulan más entradas (búsquedas en vivo
+//   con ids siempre nuevos), se vacía el Map. Evita que crezca sin límite.
+
+function langCacheKey(job) {
+  // ↑ Clave de la caché: el id de la oferta si viene; si no, título::empresa,
+  //   que es como el propio proyecto ya identifica ofertas sin id.
+  const base = job?.id ? String(job.id) : `${job?.title || ''}::${job?.company || ''}`;
+  return `${base}#${(job?.description || '').length}:${(job?.title || '').length}`;
+  // ↑ Los dos números al final son la HUELLA del texto. Si una oferta con el mismo
+  //   id llega de nuevo pero con otra descripción (la búsqueda en vivo reemplaza el
+  //   historial), la huella cambia y se recalcula: así la caché NUNCA devuelve el
+  //   idioma de una oferta anterior que compartía el id. Y son solo dos números,
+  //   así que el costo de verificar es despreciable.
+}
+
+// Igual que detectJobLanguage(), pero usando (y llenando) la caché de arriba.
+// ↑ Esta es la que llaman los componentes: la lógica real vive en la función pura
+//   de más arriba, que es la que se puede testear sin cachear nada.
+export function jobLanguageInfo(job) {
+  const key = langCacheKey(job);
+  const cached = langCache.get(key);
+  if (cached) return cached;
+  // ↑ Hit de caché: se devuelve el mismo objeto, sin volver a tokenizar nada.
+  const info = detectJobLanguage(job);
+  if (langCache.size >= LANG_CACHE_MAX) langCache.clear();
+  langCache.set(key, info);
+  return info;
+}
+
+// Texto del tooltip de la etiqueta. Vive acá y no en los componentes para que la
+// tarjeta y el modal digan EXACTAMENTE lo mismo.
+// ↑ Igual se marca con el nombre del idioma completo ("castellano"), porque en la
+//   tarjeta la sigla "ES" sola no le dice nada a quien pasa el mouse.
+export function langBadgeTitle(info) {
+  const name = LANG_NAME[info.lang] || '';
+  if (info.confidence === 0) {
+    return `No hay texto suficiente para detectar el idioma; se muestra ${name} por defecto.`;
+  }
+  // ↑ Confianza 0 = ni una palabra funcional en título ni descripción: el valor
+  //   mostrado es el de la interfaz, no una detección. Conviene decirlo explícito.
+  if (info.weak) {
+    return `Oferta en ${name} (estimado: hay poco texto para confirmarlo).`;
+  }
+  return `Oferta en ${name} (detectado del ${info.source === 'titulo' ? 'título' : 'texto'}).`;
+}
+
 // Convierte una fecha (timestamp) en "cuántos días pasaron desde esa fecha".
 // Útil para el historial: "Vista hace 3 días", "Vista hoy", etc.
 // ↑ Ejemplo: si `ts` es el instante de hace 3 días, devuelve 3.

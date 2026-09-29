@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 // ↑ Hooks de React: useState (memoria del componente), useEffect (efectos como
-//   cargar datos al inicio) y useCallback (funciones "memorizadas" que no se
-//   recrean en cada render, cosa que los hijos no se re-rendericen de más).
+//   cargar datos al inicio), useCallback (funciones "memorizadas" que no se
+//   recrean en cada render, cosa que los hijos no se re-rendericen de más) y
+//   useMemo (guardar el RESULTADO de un cálculo para no repetirlo en cada render).
 
 import CvPanel from './components/CvPanel.jsx';
 // ↑ Panel lateral con el CV de Ali (avatar, sobre mí, skills, enlaces).
@@ -47,6 +48,34 @@ function getSavedTheme() {
   }
 }
 
+// Clave del almacenamiento del navegador donde vive el % de match mínimo elegido.
+// ↑ Sigue el mismo patrón que el tema ('buscaempleo-theme'): es una preferencia
+//   de ESTA computadora, no del backend. Con el prefijo 'bt_' no chocamos con
+//   otras apps que compartan el mismo dominio.
+const MIN_SCORE_STORAGE_KEY = 'bt_min_score';
+
+// Lee del navegador el % de match mínimo con el que quedó la sesión anterior.
+// ↑ Mismo patrón perezoso que el tema: se le pasa la FUNCIÓN a useState, que la
+//   ejecuta una sola vez al montar. Si no hay nada guardado, arranca en 0 (ver
+//   todo). Si lo que hay guardado está corrupto ("abc", "NaN", un objeto), se
+//   devuelve 0 en vez de romper: la app nunca crashea al cargar.
+function getSavedMinScore() {
+  try {
+    const raw = localStorage.getItem(MIN_SCORE_STORAGE_KEY);
+    if (raw === null) return 0;
+    // ↑ null = nunca se guardó nada: es el primer arranque, devolvemos el default.
+    const parsed = Number(raw);
+    // ↑ localStorage guarda TEXTO. Number() lo vuelve número: "82" -> 82, y "abc"
+    //   -> NaN, que es justamente el caso que hay que descartar.
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) return 0;
+    // ↑ Solo aceptamos un entero de 0 a 100. Cualquier otra cosa (NaN, 82.5, 500,
+    //   -3) se trata como "no había nada guardado" y vuelve al 0 por defecto.
+    return parsed;
+  } catch {
+    return 0;
+  }
+}
+
 export default function App() {
   // ↑ Este es el componente padre: acá vive casi todo el estado global de la app y
   //   desde acá se le pasan datos y funciones (callbacks) a los hijos por props.
@@ -65,6 +94,12 @@ export default function App() {
   const [jobsData, setJobsData] = useState({ jobs: [], _online: false });
   // ↑ Objeto que guarda las ofertas de la región y si vienen online o demo.
   //   _online nos permite mostrar un mensaje distinto según el origen de los datos.
+
+  const [minScore, setMinScore] = useState(getSavedMinScore);
+  // ↑ Filtro de "% de match mínimo" (0 = mostrar todas). Es un estado GLOBAL de
+  //   la app, no por región: el usuario lo elige una vez y se mantiene al cambiar
+  //   de pestaña o de vista (live/historial). Se inicializa con la función
+  //   getSavedMinScore, que lee el valor de la sesión anterior del navegador.
 
   const [consultoras, setConsultoras] = useState([]);
   // ↑ Listado de consultoras QA que muestra la pestaña "Consultoras QA".
@@ -100,6 +135,18 @@ export default function App() {
       localStorage.setItem('buscaempleo-theme', theme);
     } catch {}
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MIN_SCORE_STORAGE_KEY, String(minScore));
+      // ↑ Se guarda como texto (localStorage solo guarda strings) y se vuelve a
+      //   leer con Number() en getSavedMinScore. El try/catch cubre el caso de
+      //   navegación privada o almacenamiento lleno: el filtro sigue funcionando
+      //   en memoria, solo no sobrevive al F5.
+    } catch {}
+  }, [minScore]);
+  // ↑ Cada vez que cambia el filtro se persiste. Con el filtro en 0 también se
+  //   guarda: así "volver a 0" se recuerda entre sesiones, que es lo esperado.
 
   // Al montar el componente (corre UNA sola vez porque el array de dependencias está vacío),
   // traemos el perfil y las ofertas de Argentina en paralelo con Promise.all.
@@ -147,6 +194,24 @@ export default function App() {
     setJobsData(data);
     setLoading(false);
   }, [viewMode]);
+
+  // Callback que recibe el % de match mínimo elegido en la toolbar. Es la
+  // SEGUNDA capa de validación: el Toolbar ya no deja pasar valores fuera de
+  // 80-100 desde el campo, pero acá se vuelve a acotar el rango para que el
+  // estado nunca pueda quedar en un número imposible (aunque el valor venga de
+  // un botón, de una extensión o de un futuro control).
+  const handleMinScoreChange = useCallback((value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    // ↑ Si no es un número (NaN, texto vacío) se ignora: el filtro sigue como
+    //   estaba y no se toca el listado.
+    const rounded = Math.round(parsed);
+    setMinScore(Math.min(100, Math.max(0, rounded)));
+    // ↑ Math.min/max "aprieta" el valor al rango 0-100. Es la garantía de que
+    //   minScore siempre es un entero válido, venga de donde venga.
+  }, []);
+  // ↑ useCallback con dependencias vacías: la función no cambia nunca, así que
+  //   Toolbar no se re-renderiza de más por culpa de este callback.
 
   // Acción del botón "Actualizar búsqueda": fuerza al backend a re-consultar las fuentes
   // (ignorando la caché de 30 min) y recarga la región actual.
@@ -228,6 +293,33 @@ export default function App() {
     //   original con los campos nuevos (estado/notas) sin mutar el original.
   }
 
+  // Lista de ofertas YA filtrada por % de match: solo las que llegan al mínimo.
+  // ↑ Se calcula con useMemo porque es un filtro sobre un arreglo que puede
+  //   tener cientos de ofertas: sin memo se repetiría en CADA re-render (al
+  //   cambiar de tema, al abrir un modal, etc.) aunque el filtro no cambie.
+  const visibleJobs = useMemo(
+    () => (jobsData.jobs || []).filter((job) => Number(job.score ?? 0) >= minScore),
+    [jobsData.jobs, minScore],
+  );
+  // ↑ El ?? 0 trata una oferta sin score como 0% de match, que es lo mismo que
+  //   "sin filtro": así nunca desaparecen ofertas por un dato que no vino.
+  //   El .filter NO modifica el arreglo original: devuelve uno nuevo.
+
+  // Frase que se le agrega al texto de estado para que se vea qué hizo el filtro.
+  function filterSummary() {
+    if (minScore <= 0) return '';
+    // ↑ Con el filtro en 0 no se dice nada: la app se ve exactamente igual que
+    //   antes de que este filtro existiera.
+    const total = (jobsData.jobs || []).length;
+    if (!visibleJobs.length) {
+      // ↑ Caso "el filtro dejó la lista vacía": el mensaje tiene que explicar que
+      //   las ofertas SÍ existen pero ninguna llega al % pedido, porque decir
+      //   solamente "0 ofertas" haría pensar que la región no tiene resultados.
+      return ` Ninguna de las ${total} ofertas llega al ${minScore}% de match: bajá el filtro o volvé al preset 0%.`;
+    }
+    return ` Filtro activo: ${visibleJobs.length} de ${total} ofertas con ${minScore}% de match o más.`;
+  }
+
   // Texto de estado que se muestra en la toolbar, según qué se esté viendo.
   function statusText() {
     if (region === 'consultoras') {
@@ -240,14 +332,19 @@ export default function App() {
     if (searchingLinkedIn) return 'Consultando LinkedIn con Apify (máximo 50 resultados)…';
     if (linkedinSearchError) return `Búsqueda de LinkedIn: ${linkedinSearchError}`;
     if (jobsData.source === 'LinkedIn / Apify') {
-      return `${jobsData.jobs.length} ofertas de LinkedIn, filtradas a los últimos 30 días.`;
+      return `${visibleJobs.length} ofertas de LinkedIn, filtradas a los últimos 30 días.${filterSummary()}`;
+      // ↑ El conteo usa la lista YA filtrada: el usuario ve cuántas quedan, no cuántas
+      //   hay, y la frase del filtro aclara el total por si quedó alguna duda.
     }
     if (viewMode === 'history') {
-      return `Historial de los últimos 6 meses · ${(jobsData.jobs || []).length} ofertas · las más viejas se purgan solas. “No aparece” no confirma cobertura.`;
+      return `Historial de los últimos 6 meses · ${visibleJobs.length} ofertas · las más viejas se purgan solas. “No aparece” no confirma cobertura.${filterSummary()}`;
     }
-    return jobsData._online
+    return (jobsData._online
       ? 'Conexión exitosa con las fuentes de empleo.'
-      : 'Modo demo: no se pudo contactar las fuentes en línea. Mostrando ofertas de ejemplo.';
+      : 'Modo demo: no se pudo contactar las fuentes en línea. Mostrando ofertas de ejemplo.') + filterSummary();
+    // ↑ Los paréntesis encierran el ternario para poder sumarle el filterSummary()
+    //   con el operador +. Con el filtro en 0, filterSummary() devuelve '' y el
+    //   texto queda idéntico al de antes.
   }
 
   const linkedinKeywords = linkedinProfileKeywords(profile);
@@ -294,9 +391,13 @@ export default function App() {
             onLinkedInSearch={handleLinkedInSearch}
             onToggleHistory={handleToggleHistory}
             linkedinKeywords={linkedinKeywords}
+            minScore={minScore}
+            onMinScoreChange={handleMinScoreChange}
           />
           {/* ↑ La toolbar recibe por props el estado y los callbacks; los hijos no
-              modifican el estado del padre directamente, solo "avisan" con eventos. */}
+              modifican el estado del padre directamente, solo "avisan" con eventos.
+              minScore + onMinScoreChange son el filtro de % de match: el valor va
+              de bajada y el callback avisa cuando el usuario elige uno nuevo. */}
 
           {/* Render condicional: la sección derecha muestra un componente u otro
               según la región elegida (ofertas, consultoras o análisis). */}
@@ -316,9 +417,15 @@ export default function App() {
             // ↑ Propuesta de Interés: recibe los datos de analítica, el perfil y los
             //   controles de búsqueda (actualizar / desde enero / LinkedIn).
           ) : (
-            <JobList key={`${region}-${viewMode}`} jobs={jobsData.jobs || []} viewMode={viewMode} onOpen={openDetail} />
-            // ↑ Ofertas de la región: el key fuerza a React a volver a montar la lista
-            //   cuando cambiamos de región o de vista, reseteando la paginación.
+            <JobList key={`${region}-${viewMode}`} jobs={visibleJobs} viewMode={viewMode} minScore={minScore} onOpen={openDetail} />
+            // ↑ Ofertas de la región YA filtradas por % de match (visibleJobs): el
+            //   componente no sabe nada del filtro, solo recibe lo que tiene que
+            //   mostrar. minScore lo recibe aparte SÓLO para poder explicar en el
+            //   mensaje de "no hay nada" que el filtro dejó la lista vacía.
+            //   Ojo: el key NO incluye minScore a propósito. Si lo incluyera, cada
+            //   cambio de filtro remontaría la lista y perderías el orden elegido;
+            //   el `safePage` de JobList ya se encarga de corregir la paginación
+            //   cuando el filtro deja menos páginas.
           )}
         </section>
       </main>
