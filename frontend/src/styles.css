@@ -135,6 +135,49 @@ body {
 
 .status { color: var(--muted); font-size: 0.9rem; margin-bottom: 10px; }
 
+/* La toolbar grew: la columna de status (texto + "actualizado hace X") crece para
+   usar el ancho, y los banners de confirmación bajan a su propia línea. */
+.toolbar-status-column { flex: 1 1 320px; min-width: 0; }
+.toolbar-status-column .status { margin-bottom: 0; }
+.status-checked { color: var(--muted); font-size: 0.78rem; opacity: 0.85; margin-top: 4px; }
+.save-banner {
+  flex: 1 0 100%; display: flex; align-items: flex-start; gap: 8px;
+  font-size: 0.84rem; padding: 9px 12px; border-radius: var(--radius-sm); margin-top: 10px;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--muted);
+}
+.save-banner.ok { border-color: rgba(34, 197, 94, 0.45); color: var(--text); }
+/* ↑ Banner de confirmación del guardado. Antes NO existía: el backend ya
+   devolvía `saved` y nadie lo leía, así que el usuario no tenía forma de saber si
+   las ofertas se estaban guardando (media razón del reporte original). */
+.save-banner.warn { border-color: rgba(239, 68, 68, 0.5); color: var(--red); }
+.save-banner.warn span { color: var(--red); }
+
+/* Estadísticas de la corrida, plegadas: importan una vez por búsqueda, no en
+   cada scroll, así que van en <details> y el <summary> ya hace la pregunta que el
+   usuario se hace ("¿por qué veo menos de lo que pedí?"). */
+.stats-box { flex: 1 0 100%; margin-top: 8px; font-size: 0.82rem; color: var(--muted); }
+.stats-box summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+.stats-box summary:hover { text-decoration: underline; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-top: 8px; }
+.stats-grid .stat { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.stats-grid dt { font-size: 0.76rem; }
+.stats-grid dd { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+.stats-grid dd.zero { color: var(--muted); font-weight: 500; opacity: 0.6; }
+/* ↑ Las filas en cero se atenúan: lo que sirve para entender una búsqueda que
+   "trajo menos" es dónde se perdieron ofertas, no una lista de ceros. */
+.stats-grid .stat-hint { display: block; font-size: 0.7rem; margin-top: 3px; opacity: 0.8; }
+
+/* Control de cuántas ofertas pedirle a Apify: mismo look que el select de orden. */
+.apify-limit-control { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+.apify-limit-select { padding: 6px 8px; font-size: 0.8rem; }
+.apify-limit-select:disabled { opacity: 0.6; cursor: default; }
+.effective-limit { flex: 1 0 100%; font-size: 0.74rem; color: var(--muted); opacity: 0.85; margin-top: 2px; }
+/* ↑ "Última corrida: se pidieron N ofertas". Se muestra porque el número pedido es
+   un PISO y no un tope: sin esta línea, ver 78 ofertas con un botón que dice
+   "desde 200" parece un error. */
+/* ↑ La toolbar crece en alto con este bloque; .toolbar es flex-wrap, así que los
+   bloques con `flex: 1 0 100%` caen solos a una línea nueva. */
+
 /* ----- Toolbar (actualizar / historial) ----- */
 .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar .status { margin-bottom: 0; }
@@ -238,6 +281,48 @@ body {
 .job-card .job-title { font-size: 1rem; font-weight: 600; }
 .job-card .job-company { color: var(--muted); font-size: 0.85rem; }
 
+/* Procedencia de la oferta: en qué portal se encontró. La línea va aparte de la
+   empresa porque "source" ("Reclutador (LinkedIn)", "Directo (link)") pegado al
+   nombre de la empresa parecía parte de ella. */
+.job-origin { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.job-source { font-size: 0.72rem; color: var(--muted); opacity: 0.8; }
+.job-origin .portal-badge { margin-left: 0; }
+/* ↑ El .lang-badge usa margin-left:auto para pegarse al % de match; el badge de
+   portal NO, porque vive en otra línea y tiene que quedarse a la izquierda. */
+.portal-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+  white-space: nowrap; border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+}
+.portal-linkedin { background: rgba(10, 102, 194, 0.14); color: #0a66c2; border-color: rgba(10, 102, 194, 0.4); }
+.portal-remotive { background: rgba(16, 185, 129, 0.14); color: #0e9f6e; border-color: rgba(16, 185, 129, 0.4); }
+.portal-remoteok { background: rgba(59, 130, 246, 0.14); color: #3b82f6; border-color: rgba(59, 130, 246, 0.4); }
+.portal-curada, .portal-himalayas { background: rgba(139, 92, 246, 0.14); color: #7c5cf0; border-color: rgba(139, 92, 246, 0.4); }
+.portal-demo { background: rgba(148, 163, 184, 0.16); color: var(--muted); }
+/* ↑ Una clase por portal conocido. Los colores salen de la misma familia que el
+   resto del tema (no se inventan tonos nuevos) y en todos los casos el texto va
+   con su fondo tinted para mantener el contraste legible en claro y en oscuro. */
+
+/* Fila de acciones al pie de la tarjeta: el link a la oferta y "Quitar de mi
+   lista". El link NO puede ir dentro del <button> de la tarjeta (HTML inválido),
+   así que esta fila es la razón estructural de que exista. */
+.job-actions-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.job-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.8rem; font-weight: 600; color: var(--accent); text-decoration: none;
+  padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid transparent;
+}
+.job-link:hover { text-decoration: underline; border-color: var(--accent); }
+.job-link:focus-visible { outline: 3px solid var(--accent2); outline-offset: 2px; }
+.job-link.search { color: var(--yellow); }
+/* ↑ El link a la BÚSQUEDA se pinta distinto del link a la OFERTA: son acciones
+   distintas (una abre la publicación, la otra ayuda a encontrarla) y conviene
+   que se distingan de un vistazo. */
+.job-link.none { color: var(--muted); font-weight: 500; border-style: dashed; border-color: var(--border); cursor: help; }
+/* ↑ Sin destino: se dice explícitamente en vez de esconder la fila, porque 18 de
+   las 57 ofertas curadas no tienen ningún link y el botón que aparecía y
+   desaparecía hacía pensar que la app estaba rota. */
+
 /* Pill del % de match: color según el score (verde/amarillo/rojo). */
 .job-card .match-pill { font-weight: 700; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; flex-shrink: 0; }
 .match-high { background: rgba(34, 197, 94, 0.2); color: var(--green); }
@@ -306,6 +391,20 @@ body {
 .detail-title { font-size: 1.3rem; margin-bottom: 10px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; font-size: 0.85rem; }
 .detail-meta .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px; }
+.detail-meta .chip.muted { opacity: 0.75; font-size: 0.8rem; }
+.chip-link {
+  color: var(--accent); text-decoration: none; cursor: pointer;
+  border-color: var(--accent) !important;
+}
+.chip-link:hover { text-decoration: underline; }
+.chip-link:focus-visible { outline: 3px solid var(--accent2); outline-offset: 2px; }
+/* ↑ El chip de procedencia del modal: el nombre del portal va en <strong> (es
+   el dato que se está buscando) y el link a la búsqueda va aparte, porque son
+   dos acciones distintas y una no implica la otra. */
+.btn.disabled-note { cursor: help; opacity: 0.75; box-shadow: none; background: var(--bg2); color: var(--muted); border: 1px dashed var(--border); font-weight: 500; }
+/* ↑ Botón SIN destino (no hay link de postulación ni de búsqueda): se dibuja
+   igual, con estilo atenuado, para que el modal nunca parezca que le falta algo. */
+.btn.disabled-note:hover { transform: none; filter: none; box-shadow: none; }
 .detail-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .detail-section h4 { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 .company-summary { background: rgba(99, 102, 241, 0.12); border-left: 3px solid var(--accent2); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; line-height: 1.5; }

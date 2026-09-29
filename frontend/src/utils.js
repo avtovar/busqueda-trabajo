@@ -315,6 +315,135 @@ export function langBadgeTitle(info) {
   return `Oferta en ${name} (detectado del ${info.source === 'titulo' ? 'título' : 'texto'}).`;
 }
 
+// ============================================================================
+// PROCEDENCIA DE LA OFERTA: de dónde salió y adónde ir.
+// ============================================================================
+// Por qué vive acá y no en cada componente: el badge de portal se dibuja en la
+// tarjeta (JobList) Y en el modal (JobDetailModal), y además el modal tiene que
+// decidir a dónde lleva el botón principal. Si cada uno reimplementara la regla,
+// el día que aparezca un portal nuevo uno de los dos queda mintiendo. Es el mismo
+// criterio que ya se usa con matchClass() y la etiqueta de idioma: la decisión
+// se toma UNA vez y los dos lugares la pintan igual.
+
+const PORTAL_ICONS = {
+  LinkedIn: '💼',
+  Remotive: '🌍',
+  Arbeitnow: '🛠️',
+  Himalayas: '⛰️',
+  RemoteOK: '🔌',
+  Jobicy: '📡',
+  Computrabajo: '📋',
+  Indeed: '📰',
+  InfoJobs: '🗞️',
+  Glassdoor: '👀',
+  OCC: '🎓',
+  Demo: '🧪',
+  Curada: '📌',
+};
+// ↑ Un icono por portal. Son emojis y no SVG a propósito: el proyecto ya los usa
+//   en toda la interfaz (📍, 💰, 🕒…) y así no hay ni un <img> que cargar.
+
+const PORTAL_LIKE = [
+  { portal: 'LinkedIn', re: /linkedin/i },
+  { portal: 'Demo', re: /(?:^|[^a-z0-9])demos?(?:[^a-z0-9]|$)|simulad/i },
+  { portal: 'Curada', re: /curad/i },
+];
+// ↑ Solo los tres que se pueden deducir de `source` con confianza. El resto de
+//   los portales (Remotive, Arbeitnow...) NUNCA están en `source`: llegan por
+//   `portal` desde server/portal.js. Si `portal` no vino y `source` no dice nada
+//   reconocible, se cae en 'Curada', que es el mismo default del backend y no
+//   inventa una procedencia que nadie verificó.
+
+// ¿Es un link usable? Filtra los tres "no links" que circulan en la base:
+// vacío, '#' (ancla de navegación) y los que no son http(s).
+// ↑ Es exactamente el motivo por el que 18 ofertas curadas se quedaban sin
+//   destino en pantalla: la condición anterior solo miraba truthiness, y '#' es
+//   truthy. Chequear el esquema además evita abrir 'javascript:...' o un 'www'
+//   sin protocolo.
+export function usableUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || raw === '#') return '';
+  return /^https?:\/\//i.test(raw) ? raw : '';
+}
+
+// Nombre del portal que se muestra en el badge.
+// ↑ Prioridad: `portal` (lo calcula server/portal.js con los patrones del link),
+//   después lo que se pueda deducir de `source`, y al final 'Curada'. El `source`
+//   legacy ("Reclutador (LinkedIn)", "Directo (link)") NO se muestra como nombre
+//   de portal: es texto libre y hay 44 variantes distintas.
+export function portalLabel(job) {
+  const explicit = typeof job?.portal === 'string' ? job.portal.trim() : '';
+  if (explicit) return explicit;
+  const source = String(job?.source || '');
+  for (const { portal, re } of PORTAL_LIKE) {
+    if (re.test(source)) return portal;
+  }
+  return 'Curada';
+}
+
+// Todo lo que la interfaz necesita saber del portal en una sola llamada:
+// el nombre, la clase CSS (derivada del nombre, así un portal nuevo se estiliza
+// solo con la clase genérica) y el icono.
+export function portalInfo(job) {
+  const name = portalLabel(job);
+  return {
+    name,
+    icon: PORTAL_ICONS[name] || '🔗',
+    // ↓ 'linkedin' / 'remoteok' / 'curada': minúsculas y sin espacios ni acentos,
+    //   para poder escribir `portal-linkedin` en el CSS sin clases rarísimas.
+    slug: name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-'),
+  };
+}
+
+// Destino de una oferta: SIEMPRE el mejor disponible, nunca undefined.
+// ↑ Este es el fix de "no me da el link que me lleve a la búsqueda": la función
+//   tiene una sola regla de prioridad y la usan los dos componentes, así que una
+//   oferta sin `applyUrl` igual cae a `sourceUrl` y solo se queda sin destino si
+//   de verdad no hay ningún link en toda la base.
+export function jobDestination(job, { langIsEn = false } = {}) {
+  const applyUrl = usableUrl(job?.applyUrl);
+  const sourceUrl = usableUrl(job?.sourceUrl);
+  const portal = portalInfo(job).name;
+  if (applyUrl) {
+    return {
+      url: applyUrl,
+      kind: 'apply',
+      label: langIsEn ? `Apply on ${portal}` : `Aplicar en ${portal}`,
+      icon: '🔗',
+      title: langIsEn
+        ? `Open the job offer at ${portal} in a new tab`
+        : `Abrir la oferta en ${portal} (se abre en otra pestaña)`,
+    };
+  }
+  if (sourceUrl) {
+    return {
+      url: sourceUrl,
+      kind: 'search',
+      label: langIsEn ? `Search on ${portal}` : `Buscar en ${portal}`,
+      icon: '🔎',
+      // ↑ NO es el link de la oferta sino la página de búsqueda del portal: por
+      //   eso el texto lo dice explícito, para no hacer creer que se abre la
+      //   publicación cuando en realidad se abre cómo encontrarla.
+      title: langIsEn
+        ? `This job has no direct link; open the ${portal} search to find it`
+        : `Esta oferta no tiene link directo: abrí la búsqueda en ${portal} para encontrarla`,
+    };
+  }
+  return null;
+  // ↑ Sin ningún link: el llamador TIENE que decirlo en pantalla (no esconder el
+  //   botón en silencio), porque si no el usuario no entiende qué pasó.
+}
+
+// Texto honesto para cuando no hay ningún destino posible.
+// ↑ Se muestra explícitamente en vez de no renderizar nada: 18 de las 57 ofertas
+//   curadas están en este caso, y un botón que aparece y desaparece según la
+//   oferta hace pensar que la app falló.
+export function noDestinationText(job, { langIsEn = false } = {}) {
+  const portal = portalInfo(job).name;
+  if (langIsEn) return `No direct link for this job: contact ${portal} directly.`;
+  return `Sin link directo: contactá por ${portal}.`;
+}
+
 // Convierte una fecha (timestamp) en "cuántos días pasaron desde esa fecha".
 // Útil para el historial: "Vista hace 3 días", "Vista hoy", etc.
 // ↑ Ejemplo: si `ts` es el instante de hace 3 días, devuelve 3.
@@ -325,6 +454,45 @@ export function daysAgo(ts) {
   // Resta el timestamp guardado al tiempo actual y divide por los ms de un día.
   // ↑ Math.floor() redondea hacia abajo: 3 días y 2 horas dan 3, nunca 3.08.
   return Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
+}
+
+// "Actualizado hace 3 minutos / hace 2 horas / hace 6 días".
+// ↑ NO existe daysAgo() para esto: daysAgo redondea a días enteros, y para la
+//   hora del scrape eso serviría solo a partir de las 24 h, cuando al usuario le
+//   importa justo lo contrario ("¿la busqué hace un minuto o hace tres días?").
+//   Acepta las tres formas que puede mandar el backend: ISO ('2026-09-29T18:09'),
+//   epoch en milisegundos (checkedAt de algunas fuentes) o epoch en segundos.
+//   Devuelve null si no hay fecha o no se puede parsear, para que quien llame
+//   decida si muestra nada o un texto genérico. No es memoizable a propósito: son
+//   lecturas de reloj, y llamarlo una vez por render es exactamente lo que se
+//   quiere (el texto tiene que envejecer mientras la pestaña está abierta).
+export function timeAgo(value) {
+  const raw = typeof value === 'string' ? value.trim() : value;
+  if (raw === null || raw === undefined || raw === '') return null;
+  // ↑ 'String(raw).trim()' convierte cualquier tipo a texto, pero acá se descarta
+  //   el caso vacío explícitamente porque Date.parse('') da NaN igual.
+  let ts = NaN;
+  if (typeof raw === 'number') ts = raw < 1e12 ? raw * 1000 : raw;
+  // ↑ 10 dígitos = segundos, 13 dígitos = milisegundos (mismo criterio que
+  //   formatDisplayDate y publicationTimestamp, para no tener tres reglas).
+  else if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw);
+    ts = numeric < 1e12 ? numeric * 1000 : numeric;
+  } else ts = Date.parse(raw);
+  if (!Number.isFinite(ts)) return null;
+  // ↑ NaN es la señal de "esto no es una fecha": se devuelve null en vez de
+  //   "hace NaN minutos", que es lo que se ve si no se chequea.
+
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  // ↑ Math.max(0, ...) porque un reloj de la máquina atrasado daría negativos
+  //   ("hace -3 minutos"), que es peor que decir "recién" cuando no es así.
+  if (seconds < 60) return 'hace instantes';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `hace ${minutes} minuto${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours} hora${hours === 1 ? '' : 's'}`;
+  const days = Math.floor(hours / 24);
+  return `hace ${days} día${days === 1 ? '' : 's'}`;
 }
 
 // ↑ Convierte cualquier fecha que mande el backend en texto legible en español:

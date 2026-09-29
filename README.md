@@ -137,10 +137,25 @@ Después editá `.env` y completá lo que necesites.
 | Variable | Requerida | Default | Para qué sirve |
 |---|---|---|---|
 | `APIFY_API_TOKEN` | No (opcional) | — | Habilita la búsqueda en LinkedIn vía Apify. Sin este token, **todas las demás funciones funcionan igual**. |
+| `APIFY_MAX_RESULTS` | No | `200` | Máximo de ofertas que trae cada búsqueda de LinkedIn. Se acota siempre entre **20 y 1000**. |
 | `PORT` | No | `3000` | Puerto donde escucha el servidor. Cambialo si el 3000 ya está ocupado. |
 
 > [!WARNING]
 > **El archivo `.env` nunca se sube a Git.** Está listado en `.gitignore` junto con `*.env`, `*.pem`, `*.key` y `secrets/`. Asegurate de no pegues el token en un chat, en un issue ni en un commit.
+
+### Sobre `APIFY_MAX_RESULTS`
+
+La búsqueda de LinkedIn pide sus resultados **paginado**: el actor de Apify
+`curious_coder~linkedin-jobs-scraper` recibe un array de URLs y devuelve unas 25
+ofertas por cada una, así que para traer más ofertas se piden más páginas de
+búsqueda (hasta 8, que es lo que el actor procesa razonablemente).
+
+- **Prioridad**: el `limit` que mande el frontend en el body de
+  `POST /api/linkedin-search` > `APIFY_MAX_RESULTS` del `.env` > `200`.
+- El valor se acota siempre al rango **20..1000**, sin importar de dónde venga.
+  Si ponés `5000`, se usa `1000`; si ponés `abc` o lo dejás vacío, se usa `200`.
+- **Cuesta plata**: cada búsqueda ejecuta el actor y Apify factura por ejecución.
+  Subir el número no es gratis, y por eso el default es 200 y no 1000.
 
 ### Sobre `APIFY_API_TOKEN`
 
@@ -205,7 +220,7 @@ Todos los endpoints responden JSON. El servidor escucha en `PORT` (3000 por defe
 | `POST` | `/api/consultoras/status` | Actualiza el estado de contacto de una consultora. |
 | `GET` | `/api/history?region=X` | Historial de ofertas vistas para esa región. |
 | `POST` | `/api/refresh` | Fuerza una refresco de las fuentes en vivo. |
-| `POST` | `/api/linkedin-search` | Busca ofertas en LinkedIn vía Apify. Envía el body `{ "region": "..." }`. Requiere `APIFY_API_TOKEN`. **Es la única ruta que puede costar plata**: ejecuta un actor de Apify que se factura por ejecución. Sin token devuelve `503` y ni siquiera sale a la red |
+| `POST` | `/api/linkedin-search` | Busca ofertas en LinkedIn vía Apify. Body: `{ "region": "...", "limit": 200 }` (el `limit` es opcional). Requiere `APIFY_API_TOKEN`. **Es la única ruta que puede costar plata**: ejecuta un actor de Apify que se factura por ejecución. Sin token devuelve `503` y ni siquiera sale a la red. Responde `{ region, jobs, total, regions, stats, saved, ... }`: `jobs` es el bucket pedido, `regions` trae **todos** los buckets, `stats` el detalle de lo que se descartó y `saved` si las ofertas se pudieron guardar en el historial |
 
 ### Ejemplos
 

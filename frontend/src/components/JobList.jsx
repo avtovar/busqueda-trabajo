@@ -1,9 +1,12 @@
 import { useState } from 'react';
 // ↑ Hook useState: la paginación necesita memoria interna (en qué página estamos).
 
-import { matchClass, daysAgo, formatDisplayDate } from '../utils.js';
-// ↑ Helpers: matchClass (color del % de match), daysAgo (días desde la última vista)
-//   y formatDisplayDate (fecha legible).
+import { matchClass, daysAgo, formatDisplayDate, portalInfo, jobDestination } from '../utils.js';
+// ↑ Helpers: matchClass (color del % de match), daysAgo (días desde la última vista),
+//   formatDisplayDate (fecha legible) y los dos de procedencia nueva —portalInfo
+//   (nombre + icono + clase del portal) y jobDestination (el mejor link que haya:
+//   el de la oferta o, si no hay, el de la búsqueda)— que son los que hacen que
+//   la tarjeta muestre de dónde salió la oferta y adónde ir.
 import LanguageBadge from './LanguageBadge.jsx';
 // ↑ La etiqueta de idioma (ES/EN). Va en un componente aparte y no en línea acá
 //   porque la misma etiqueta se dibuja también en el modal de detalle: si el
@@ -112,6 +115,74 @@ function HistoryBadge({ job }) {
     <span className="badge badge-inactive" title="La última búsqueda no la devolvió. Esto no confirma que la empresa haya cubierto la vacante.">
       ⚪ No aparece en la última búsqueda · {lastSeen ? `vista ${lastSeen} (${label})` : label}
     </span>
+  );
+}
+
+// Sub-componente local: el badge de procedencia ("de dónde salió esta oferta").
+// No se exporta porque solo lo usa JobList; el modal de detalle vuelve a armar el
+// suyo porque necesita además el link a la búsqueda, no solo el nombre.
+function PortalBadge({ job }) {
+  const portal = portalInfo(job);
+  // ↑ Toda la lógica de qué nombre mostrar está en utils.js (portalInfo): acá
+  //   solo se pinta. Si mañana aparece un portal nuevo, no hay que tocar esto.
+
+  return (
+    <span
+      className={`portal-badge portal-${portal.slug}`}
+      // ↑ La clase sale del NOMBRE del portal normalizado, así el color vive
+      //   únicamente en el CSS y no hay un switch de colores en el JSX.
+      title={`Esta oferta salió de ${portal.name}.`}
+      // ↑ El title aclara el valor de la etiqueta: sin esto, "LinkedIn" al lado
+      //   del % de match parece otro dato del match y no la procedencia.
+    >
+      <span aria-hidden="true">{portal.icon}</span>
+      {/* ↑ aria-hidden: el emoji no aporta nada a un lector de pantalla (lo lee
+          como "maletín" o "montaña" según el reader), el texto de al lado ya
+          dice todo. */}
+      {portal.name}
+    </span>
+  );
+  // ↑ El nombre va en texto plano, NUNCA solo el ícono: un badge de color sin
+  //   texto no le dice nada a quien navega con lector de pantalla.
+}
+
+// El link de la tarjeta: a la oferta si hay `applyUrl`, y si no a la página de
+// búsqueda del portal. Vive FUERA del <button> de la tarjeta por una razón de
+// HTML, no de estilo: no se puede anidar un <a> dentro de un <button>.
+// Si se hiciera, el navegador reparenta el <a> fuera del botón y el click deja de
+// comportarse de forma predecible (y React avisa en desarrollo).
+function JobActions({ job }) {
+  const destination = jobDestination(job);
+  // ↑ Una sola fuente de verdad para el destino (ver jobDestination en utils.js):
+  //   si no hay applyUrl cae a sourceUrl, y si no hay ninguno devuelve null.
+
+  return destination ? (
+    <a
+      className={`job-link${destination.kind === 'search' ? ' search' : ''}`}
+      href={destination.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      // ↑ rel="noopener noreferrer" en TODO link externo: sin esto la pestaña
+      //   nueva recibe una referencia a la app y puede navegar con window.opener.
+      //   Es buena práctica de seguridad, no un detalle menor.
+      onClick={(e) => e.stopPropagation()}
+      // ↑ Esta fila está fuera del <button> de la tarjeta, así que el click ya
+      //   no llega a abrir el detalle; el stopPropagation lo vuelve explícito para
+      //   que el comportamiento no dependa del layout ni de futuros refactors.
+      title={destination.title}
+    >
+      <span aria-hidden="true">{destination.icon}</span>
+      {destination.label}
+      {/* ↑ Texto legible además del ícono: "Aplicar en LinkedIn" se entiende
+          leído en voz alta y de un vistazo; 🔗 solo, no. */}
+    </a>
+  ) : (
+    <span className="job-link none" title="La base no tiene link de postulación ni link de búsqueda para esta oferta.">
+      ⚠ Sin link
+    </span>
+    // ↑ Sin destino NO se esconde la fila: se dice explícitamente que esta
+    //   oferta no tiene link. 18 de las 57 ofertas curadas están en este caso y
+    //   esconder el botón hacía pensar que la app estaba rota.
   );
 }
 
@@ -275,9 +346,26 @@ export default function JobList({ jobs, viewMode, minScore, onOpen }) {
                 <div className="job-top">
                   <div>
                     <div className="job-title">{job.title}</div>
-                    <div className="job-company">{job.company} · {job.source}</div>
-                    {/* ↑ Título y empresa, y de dónde salió la oferta (LinkedIn,
-                        Apify, curada a mano, etc.). */}
+                    <div className="job-company">{job.company}</div>
+                    {/* ↑ Título y empresa. El `· {job.source}` de antes se bajó a
+                        su propia línea: `source` es texto libre legacy con 44
+                        variantes distintas ("Reclutador (LinkedIn)", "Directo
+                        (link)") y pegado al nombre de la empresa parecía parte de
+                        ella. Ahora se lee como metadata. */}
+                  <div className="job-origin">
+                    <PortalBadge job={job} />
+                    {/* ↑ "De dónde salió esta oferta". Va en su propia línea y no
+                        al lado del % de match porque es otro tipo de dato: el
+                        % mide el match con tu CV, el portal dice la procedencia. */}
+                    {job.source && job.source !== portalInfo(job).name && (
+                      <span className="job-source" title="Origen anotado a mano en la base de ofertas">
+                        {job.source}
+                        {/* ↑ `source` crudo, SOLO como dato secundario: el badge
+                            manda porque sale del link real (server/portal.js) y
+                            no de este texto libre. */}
+                      </span>
+                    )}
+                  </div>
                   </div>
                   <LanguageBadge job={job} />
                   {/* ↑ La etiqueta de idioma va PEGADA al pill del % de match (y
@@ -314,19 +402,29 @@ export default function JobList({ jobs, viewMode, minScore, onOpen }) {
                   </div>
                 )}
               </button>
-              <button
-                className="job-dismiss"
-                type="button"
-                // ↑ Este botón está FUERA del <button> anterior a propósito: HTML
-                //   no permite un botón dentro de otro (y el click en "quitar" no
-                //   debe abrir el detalle de la oferta).
-                onClick={() => dismissJob(job)}
-                aria-label={`Quitar ${job.title} de mi lista`}
-                // ↑ aria-label es el texto que leen los lectores de pantalla.
-                title="Solo la oculta en este navegador; no informa a la empresa."
-              >
-                Quitar de mi lista
-              </button>
+              <div className="job-actions-row">
+                {/* ↑ Fila de acciones al pie de la tarjeta: el link a la oferta
+                    y el botón de quitar. Wrapper NECESARIO por el HTML inválido de
+                    más abajo, no por decoración: el <button className="job-open">
+                    ocupa toda la tarjeta y no admite un <a> adentro. */}
+                <JobActions job={job} />
+                {/* ↑ El link. Va acá y no dentro del .job-open porque HTML no
+                    permite <a> dentro de <button>: el navegador lo reparenta y
+                    el click deja de comportarse bien. Además stopPropagation
+                    garantiza que abrir el link no abra el modal. */}
+                <button
+                  className="job-dismiss"
+                  type="button"
+                  // ↑ También fuera del <button> de la tarjeta, por la misma
+                  //   razón: y el click en "quitar" no debe abrir el detalle.
+                  onClick={() => dismissJob(job)}
+                  aria-label={`Quitar ${job.title} de mi lista`}
+                  // ↑ aria-label es el texto que leen los lectores de pantalla.
+                  title="Solo la oculta en este navegador; no informa a la empresa."
+                >
+                  Quitar de mi lista
+                </button>
+              </div>
             </article>
           ))}
         </div>

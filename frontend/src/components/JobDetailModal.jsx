@@ -1,8 +1,12 @@
 import { useState } from 'react';
 // ↑ useState: recordamos si el resumen ya se copió para cambiar el texto del botón.
 
-import { matchClass, linkedinSearchUrl } from '../utils.js';
-// ↑ matchClass (color del % de match) y linkedinSearchUrl (buscar la oferta en LinkedIn).
+import { matchClass, linkedinSearchUrl, portalInfo, jobDestination, noDestinationText, usableUrl } from '../utils.js';
+// ↑ matchClass (color del % de match), linkedinSearchUrl (búsqueda genérica de
+//   LinkedIn por título+empresa) y los helpers de procedencia: portalInfo,
+//   jobDestination y noDestinationText. Los tres últimos son los que garantizan
+//   que este modal NUNCA quede sin salida: si la oferta no tiene link directo,
+//   cae al link de su búsqueda, y si no tiene ninguno se lo dice al usuario.
 import LanguageBadge from './LanguageBadge.jsx';
 // ↑ La MISMA etiqueta de idioma (ES/EN) que se ve en la tarjeta de la lista. Se
 //   importa del componente compartido y no se re-dibuja acá para que las dos
@@ -68,6 +72,20 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
 
   const wanted = s.requiredSkills || [];
   // ↑ Skills que pide la oferta y que Ali ya tiene.
+
+  const portal = portalInfo(job);
+  // ↑ De dónde salió la oferta. Se calcula UNA vez y se usa en el chip de
+  //   procedencia y en el texto del link, para que los dos digan lo mismo.
+
+  const destination = jobDestination(job, { langIsEn });
+  // ↑ El MEJOR destino disponible, ya resuelto: applyUrl si es real, si no
+  //   sourceUrl (la búsqueda en el portal), si no null. Antes el botón se
+  //   renderizaba solo con applyUrl y las 18 ofertas curadas sin link se
+  //   quedaban sin ningún botón, sin explicación.
+
+  const searchUrl = usableUrl(job.sourceUrl);
+  // ↑ El link de búsqueda por separado, porque en la línea de procedencia se
+  //   muestra aunque haya link directo (el usuario quiere saber dónde se encontró).
   const gaps = job.missed || [];
   // ↑ Skills que pide la oferta y NO están en el CV (brechas).
 
@@ -124,7 +142,33 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
           <span className="chip">📍 {job.location || 'Remote'}</span>
           {job.modality && <span className="chip">🕒 {job.modality}</span>}
           {/* ↑ Modalidad del puesto (full time, home office, híbrido X días) si viene en el empleo. */}
-          <span className="chip">{job.source}</span>
+          <span className={`chip portal-badge portal-${portal.slug}`}>
+            {/* ↑ Procedencia: el chip dice ENCONTRADA EN {portal} y no repite el
+                `source` crudo. `source` es texto libre legacy con 44 variantes
+                ("Reclutador (LinkedIn)", "Directo (link)"), no dice de qué portal
+                es la oferta; el portal sí, y lo calcula el backend del link real. */}
+            <span aria-hidden="true">{portal.icon}</span>
+            {langIsEn ? 'Found on' : 'Encontrada en'} <strong>{portal.name}</strong>
+          </span>
+          {searchUrl && (
+            <a
+              className="chip chip-link"
+              href={searchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={langIsEn ? 'Open the search where this job was found' : 'Abrir la búsqueda en el portal donde se encontró esta oferta'}
+            >
+              🔎 {langIsEn ? 'see the search' : 'ver la búsqueda'}
+              {/* ↑ Destino alternativo SIEMPRE visible, incluso con link directo:
+                  el reporte del usuario era justamente no saber de dónde salió
+                  cada oferta, y "ver la búsqueda" responde eso siempre. */}
+            </a>
+          )}
+          {job.source && job.source !== portal.name && (
+            <span className="chip muted" title="Origen anotado a mano en la base de ofertas">{job.source}</span>
+            // ↑ `source` queda como dato secundario, con su estilo tenue para no
+            //   competir con el portal: sirve para saber quién la cargó, no el link.
+          )}
           <LanguageBadge job={job} />
           {/* ↑ La etiqueta de idioma va JUNTO al pill de "Match X%", no adentro:
               el idioma de la oferta y el % de match son dos datos distintos y
@@ -165,12 +209,28 @@ export default function JobDetailModal({ job, summary, region, profile, onClose,
           </div>
         )}
         <div className="btn-row">
-          {job.applyUrl && job.applyUrl !== '#' && (
-            /* ↑ Solo mostramos "Aplicar" si hay URL real (no '#' de las ofertas demo). */
-            <a className="btn" href={job.applyUrl} target="_blank" rel="noopener noreferrer">
-              {langIsEn ? 'Apply on portal' : 'Aplicar en el portal'}
-              {/* ↑ Texto en inglés o español según la región. */}
+          {destination ? (
+            <a
+              className="btn"
+              href={destination.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={destination.title}
+            >
+              <span aria-hidden="true">{destination.icon}</span>
+              {destination.label}
+              {/* ↑ El texto lo arma jobDestination() con el idioma y el nombre del
+                  portal ya puestos: "Aplicar en LinkedIn", "🔎 Buscar en Curada".
+                  El botón YA NUNCA se esconde: siempre hay salida si hay algún
+                  link en la base. */}
             </a>
+          ) : (
+            <span className="btn secondary disabled-note" title="No hay ningún link en la base para esta oferta: contactá a la empresa por el nombre de arriba.">
+              {noDestinationText(job, { langIsEn })}
+              {/* ↑ Último caso, y se DICE en vez de desaparecer en silencio: no hay
+                  link directo ni link de búsqueda. Es un <span> con la misma
+                  forma de botón para que la fila de acciones no cambie de alto. */}
+            </span>
           )}
           <button className="btn" onClick={() => onGenerateLetter(job.id, region)}>
             {/* ↑ onClick llama al callback del padre pasándole el id y la región. */}

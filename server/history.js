@@ -64,9 +64,54 @@ async function ensureDir() {
   }
 }
 
-// ↑ Llave única por oferta: "título::empresa" normalizada (misma idea que dedupeKey)
+// Normaliza una clave: minúsculas y solo [a-z0-9:], cualquier otra cosa pasa a
+// ser un espacio. Es lo que hace comparables "QA Engineer :: Acme" y
+// "qa-engineer::acme". Se extrajo de keyOf() para que la clave NUEVA y la clave
+// VIEJA (que se sigue soportando) se normalicen exactamente con la misma regla.
+// ↑ Normalizador de claves, compartido por keyOf() y legacyKeyOf()
+function normalizeKey(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9:]+/g, ' ').trim();
+}
+
+// ↑ "Apellido" de la oferta para la clave: sale del id, y si no hay id del link.
+//   Se limpian el protocolo y todo lo que va después del ? o del # porque esos
+//   partes cambian entre publicaciones de la misma oferta (utm_source, etc.) y
+//   justamente por eso dos urls de la MISMA oferta tienen que dar la MISMA clave.
+function linkSlug(job) {
+  const raw = job?.id || job?.applyUrl || '';
+  return String(raw)
+    .replace(/^[a-z]+:\/\//i, '')
+    .replace(/[?#].*$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+// ↑ Llave única por oferta: "título::empresa::<slug del id o del link>".
+//   ANTES era solo "título::empresa", y eso era un bug de pérdida de datos: dos
+//   ofertas DISTINTAS del mismo puesto en la misma empresa (dos vacancies del
+//   mismo cargo, o la misma vacante publicada en dos ciudades) se pisaban entre
+//   sí. La segunda reescribía `entry.job` entero y de la primera solo sobrevivían
+//   `firstSeen` y la unión de regiones: una oferta desaparecía del historial sin
+//   dejar rastro. Con 200 ofertas de LinkedIn por corrida eso pasaba todo el rato.
+//   Agregar el link al final de la clave separa las dos sin romper nada.
 function keyOf(job) {
-  return `${job.title}::${job.company}`.toLowerCase().replace(/[^a-z0-9:]+/g, ' ').trim();
+  const base = `${job.title}::${job.company}`;
+  const slug = linkSlug(job);
+  // ↓ Si la oferta no tiene ni id ni link (no debería pasar, pero no se depende de eso),
+  //   se degrada a la clave de siempre, que es la que leen las entradas viejas.
+  return normalizeKey(slug ? `${base}::${slug}` : base);
+}
+
+// ↑ La clave QUE SE USABA ANTES ("título::empresa" sin el link). No se borra
+//   del código: se necesita para migrar en caliente las 229 entradas que ya
+//   están en data/history.json con el formato viejo (ver recordSearch).
+//   Leer no se rompe: getHistoryForRegion() y las purgas ITERAN sobre
+//   Object.values/Object.entries de history.entries, nunca buscan por clave, así
+//   que las entradas viejas se siguen mostrando exactamente igual.
+function legacyKeyOf(job) {
+  return normalizeKey(`${job.title}::${job.company}`);
 }
 
 // Una oferta puede caer en más de una región en la misma corrida (el matcher la
@@ -170,15 +215,15 @@ async function recoverCorrupt(reason) {
   console.error(`[history] ${DATA_FILE} está corrupto (${reason}). Copia preservada en ${evidence}.`);
   // ↑ Primero se decide QUÉ se recuperó, y al final se escribe abajo
   let recovered = emptyHistory();
-  try {
-    const backup = JSON.parse(await readFile(BAK_FILE, 'utf-8'));
-    if (hasValidShape(backup)) {
-      console.error(`[history] Historial recuperado desde ${BAK_FILE}.`);
-      recovered = backup;
-    }
-  } catch {
-    // tampoco hay copia buena: se empieza de cero, con la evidencia ya guardada
+  // ↓ readBak() es el mismo helper que usa load() en el ENOENT: una sola definición
+  //   de "qué es un .bak válido" para los dos caminos de recuperación.
+  const backup = await readBak();
+  if (backup) {
+    console.error(`[history] Historial recuperado desde ${BAK_FILE} (${countEntries(backup)} ofertas).`);
+    recovered = backup;
   }
+  // ↓ (...si tampoco hay copia buena, `recovered` sigue siendo el historial vacío,
+  //   con la evidencia ya guardada y el aviso por consola ya hecho arriba.)
   // ↑ Lo recuperado se ESCRIBE DE VUELTA en el archivo final, no se devuelve solo en
   //   memoria. Motivo: load() tiene callers que nunca guardan. getHistoryForRegion() y
   //   expireOldJobs() solo hacen save() si purgaron algo vencido ("changed"), y en el
@@ -191,19 +236,69 @@ async function recoverCorrupt(reason) {
   //   (ver abajo), así que ni un archivo roto ni uno con forma rara pueden pisarlo:
   //   el "pisar el .bak" era cosa del viejo copyFile(DATA_FILE, BAK_FILE) de save().
   await writeAtomic(recovered);
-  return recovered;
+  // ↓ La marca de agua sube con lo recuperado: el .bak que hay en disco contiene
+  //   exactamente esto, así que ningún save() posterior puede empeorarlo.
+  return rememberLoaded(recovered);
 }
 
-// Lee el historial completo del disco, distinguiendo tres casos que antes eran todos
-// el mismo: no existe todavía (vacío, normal), no parsea, o parsea con otra forma.
-// ↑ Carga el historial desde disco; solo "no existe" devuelve estructura vacía
+// Lee el historial completo del disco, distinguiendo cuatro casos que antes eran
+// todos el mismo: no existe todavía, no existe pero SÍ hay .bak, no parsea, o
+// parsea con otra forma.
+// ↑ Intenta leer el .bak. Se usa tanto por load() en el ENOENT como por
+//   recoverCorrupt(), así que la forma de decidir si es válido está en un solo
+//   lugar. Devuelve null si no hay archivo, no parsea o no tiene la forma esperada.
+async function readBak() {
+  try {
+    const backup = JSON.parse(await readFile(BAK_FILE, 'utf-8'));
+    return hasValidShape(backup) ? backup : null;
+  } catch {
+    // sin archivo, ilegible o con otra forma: no hay nada que recuperar
+    return null;
+  }
+}
+
+// ↑ ¿Cuántas entradas tiene un historial? Lo usa el guard del .bak (ver save())
+//   y el aviso de recuperación. Object.keys sobre un objeto vacío da 0, nunca falla.
+function countEntries(history) {
+  return Object.keys(history?.entries || {}).length;
+}
+
+// ↑ "Marca de agua" del .bak: la mayor cantidad de entradas que se ha visto en un
+//   historial BUENO. Es lo que impide que un estado peor pise la red de seguridad.
+let bakWatermark = 0;
+
+// ↑ Registra un historial recién cargado y actualiza la marca de agua del .bak.
+//   Si vino de un archivo con forma válida, sus entradas son un estado confiable.
+function rememberLoaded(history) {
+  bakWatermark = Math.max(bakWatermark, countEntries(history));
+  return history;
+}
+
+// ↑ Carga el historial desde disco. Ahora el ENOENT también intenta el .bak:
+//   antes devolvía vacío y el siguiente save() recortaba los dos archivos a cero.
 async function load() {
   let raw;
   try {
     raw = await readFile(DATA_FILE, 'utf-8');
   } catch (err) {
-    // ENOENT: todavía nunca se guardó nada (primera vez) → historial vacío, es normal
-    if (err.code === 'ENOENT') return emptyHistory();
+    // ENOENT: el archivo no está. Hay dos situaciones MUY distintas detrás:
+    //   (a) todavía nunca se guardó nada (primera vez) → vacío, es lo normal;
+    //   (b) se borró, se movió o se perdió → y en ese caso el .bak es justamente
+    //       la red que existe para esto. Antes los dos casos caían en el mismo
+    //       `return emptyHistory()` y (b) terminaba con los DOS archivos vacíos:
+    //       el siguiente save() escribía {} en DATA_FILE y en el .bak, y las 200+
+    //       ofertas del usuario se perdían de forma permanente y silenciosa.
+    if (err.code === 'ENOENT') {
+      const fromBak = await readBak();
+      if (fromBak) {
+        // ↑ Aviso por consola: recuperar en silencio deja la impresión de que el
+        //   historial estaba vacío, que es lo contrario de lo que pasó.
+        console.error(`[history] ${DATA_FILE} no existe. Historial recuperado desde ${BAK_FILE} (${countEntries(fromBak)} ofertas).`);
+        return rememberLoaded(fromBak);
+      }
+      // ↓ No hay .bak: sí es la primera vez de verdad, historial vacío.
+      return rememberLoaded(emptyHistory());
+    }
     return recoverCorrupt(`no se pudo leer: ${err.message}`);
   }
   // ↑ El parseo va en su propio try para que ningún otro paso reingrese a recoverCorrupt
@@ -214,7 +309,7 @@ async function load() {
     // JSON a medio escribir (el proceso murió durante un writeFile) cae acá
     return recoverCorrupt('el contenido no es JSON válido');
   }
-  if (hasValidShape(parsed)) return parsed;
+  if (hasValidShape(parsed)) return rememberLoaded(parsed);
   return recoverCorrupt('el JSON no tiene la forma { lastRun, entries: {…} }');
 }
 
@@ -229,13 +324,29 @@ async function load() {
 //   habría una ventana sin DATA_FILE bueno y sin .bak bueno.
 // - El .bak queda igual al último guardado exitoso, no al anterior a él: no se pierde
 //   nada por no guardar la versión previa, porque DATA_FILE nunca queda a medias.
+// - GUARD DEL .BAK: si este guardado tiene MENOS entradas que el mejor historial que
+//   ya se vio, el .bak NO se escribe. Antes se escribía siempre, y como los dos
+//   archivos se armaban desde el mismo objeto en memoria, un estado degradado
+//   (por ejemplo una carga que vino vacía) dejaba los DOS archivos truncados: no
+//   quedaba red de seguridad en ningún lado. Con el guard, el .bak conserva el mejor
+//   estado conocido y es la red real.
 // ↑ Guarda el historial de forma atómica, y después el .bak con el mismo mecanismo
 async function save(history) {
   // ↑ Primero el destino final: si esto falla, el error sube y el .bak queda como era
   await writeAtomic(history);
-  // ↑ Después el .bak, desde memoria. Es el ÚNICO mecanismo de recuperación de
-  //   recoverCorrupt(), así que tiene que existir siempre y ser siempre parseable
-  await writeAtomic(history, BAK_FILE, BAK_TMP_FILE);
+  const entries = countEntries(history);
+  // ↓ Solo se renueva la red si este estado es al menos tan bueno como el mejor
+  //   conocido. `>=` (y no `>`) para poder refrescar el .bak con el mismo tamaño.
+  if (entries >= bakWatermark) {
+    await writeAtomic(history, BAK_FILE, BAK_TMP_FILE);
+    // ↑ La marca de agua es un máximo: nunca baja, así un estado degradado seguido
+    //   de uno bueno no vuelve a habilitar la escritura de uno peor.
+    bakWatermark = entries;
+  } else {
+    // ↑ Aviso por consola: la pérdida de ofertas tiene que ser visible, no una
+    //   sorpresa silenciosa en la próxima corrupción.
+    console.error(`[history] ${BAK_FILE} NO se sobrescribió: este guardado tiene ${entries} ofertas y la mejor copia conocida tiene ${bakWatermark}.`);
+  }
 }
 
 // Registra las ofertas de la búsqueda actual (por región) en el historial.
@@ -257,8 +368,31 @@ export async function recordSearch(rankedByRegion) {
     for (const [region, jobs] of Object.entries(rankedByRegion)) {
       for (const job of jobs) {
         const key = keyOf(job);
-        // ↑ ¿Ya habíamos visto esta oferta? (para conservar su firstSeen)
-        const existing = history.entries[key];
+        // ↑ ¿Ya habíamos visto esta oferta con la clave NUEVA?
+        let existing = history.entries[key];
+        // ↓ MIGRACIÓN EN CALIENTE de las entradas viejas (clave "título::empresa",
+        //   sin el link). No hace falta tocar data/history.json: cuando la oferta
+        //   vuelve a aparecer en una búsqueda, se la busca por la clave vieja, se
+        //   heredan su firstSeen y sus regiones, y la entrada vieja se elimina.
+        //   Sin esto, cambiar la clave duplicaría cada oferta en la lista: la vieja
+        //   (que ya nadie vuelve a tocar) y la nueva. Que se migren de a una es
+        //   exactamente lo que hace que el cambio sea retrocompatible de verdad.
+        if (!existing) {
+          const legacyKey = legacyKeyOf(job);
+          // ↓ Solo se migra si la clave vieja existe de verdad. Si varias ofertas
+          //   comparten título::empresa (el bug original), la PRIMERA que se
+          //   encuentra se lleva la entrada vieja y las demás, que son ofertas
+          //   DISTINTAS, entran con su propia clave nueva: ninguna se pierde.
+          if (legacyKey !== key && history.entries[legacyKey]) {
+            const legacy = history.entries[legacyKey];
+            // ↓ Se borra la entrada vieja ahora (no "después"): si no, la oferta
+            //   quedaría DOS veces en la lista, una con la clave vieja y otra con
+            //   la nueva, y el usuario vería el mismo puesto duplicado.
+            delete history.entries[legacyKey];
+            // ↑ La entrada migrada conserva su firstSeen y sus regiones previas
+            existing = legacy;
+          }
+        }
         // ↑ Une la región nueva con las que ya tenía: una oferta puede caer en más
         //   de una región y antes la segunda pisaba a la primera (se perdía el historial)
         const seen = regionsOf(existing);

@@ -101,19 +101,34 @@ export async function loadHistory(region) {
 
 // Pide al backend que refresque la búsqueda YA, ignorando la caché de 30 min.
 // No usa la respuesta: solo es un "disparador" (POST sin body).
+// ↑ Devuelve el body parseado para que el llamador pueda distinguir una recarga
+//   real de un fallo silencioso. Antes no miraba la respuesta (fire and forget),
+//   y.handleRefresh() recarga igual la región: cuando el POST fallaba (server
+//   caído a mitad de la búsqueda) la pantalla mostraba los datos viejos con la
+//   etiqueta de "recién actualizado", que es peor que avisar que no se pudo.
 export async function refreshJobs() {
   try {
-    // ↑ "Fire and forget": dispara la petición y no espera ni mira el resultado.
-    //   El POST sin body le dice al backend "borra la caché y buscá de nuevo".
-    await fetch('/api/refresh', { method: 'POST' });
-  } catch {}
+    const res = await fetch('/api/refresh', { method: 'POST' });
+    // ↑ El POST sin body le dice al backend "borra la caché y buscá de nuevo".
+    return res.ok ? await res.json().catch(() => ({})) : { ok: false };
+  } catch {
+    return { ok: false };
+    // ↑ No se lanza: refrescar la lista no es una acción que pueda "fallar" en
+    //   pantalla de forma fatal. Lo que sí se hace es devolver ok:false para que
+    //   el padre pueda avisar en vez de fingir que la lista está al día.
+  }
 }
 
 // ↑ ÚNICA función de este archivo que NO cae al FALLBACK: si falla, lanza el
 //   error. Motivo: esta búsqueda delega en un servicio externo (Apify), tarda y
 //   cuesta plata; si falló, el usuario tiene que enterarse, y el componente que
 //   llama es el que muestra el mensaje de error.
-export async function searchLinkedInJobs(region) {
+// ↑ `limit` es opcional: si viene, el backend lo usa (tiene prioridad sobre
+//   APIFY_MAX_RESULTS). El backend lo acota a 20..1000 y PAGINA hasta 8 páginas,
+//   así que el número es un piso: pedir 50 puede devolver 78. Se manda siempre
+//   el valor del control de la toolbar para que lo que dice la pantalla sea
+//   exactamente lo que se ejecutó.
+export async function searchLinkedInJobs(region, limit) {
   let response;
   // ↑ `let` porque se asigna adentro del try y se usa después del catch.
   try {
@@ -122,7 +137,7 @@ export async function searchLinkedInJobs(region) {
       // ↑ method: 'POST' = enviamos datos (una región), no solo pedimos.
       headers: { 'Content-Type': 'application/json' },
       // ↑ Le decimos al server que lo que va en el body es JSON, no texto plano.
-      body: JSON.stringify({ region }),
+      body: JSON.stringify(limit ? { region, limit } : { region }),
       // ↑ El body viaja como TEXTO: por eso hay que convertir el objeto con
       //   JSON.stringify. El server lo vuelve a convertir en objeto al recibirlo.
     });

@@ -16,6 +16,13 @@ import { linkedinSearchUrl } from '../utils.js';
 //   dispara ninguna consulta a la red (no se toca server/ ni api.js).
 // ============================================================================
 
+const APIFY_LIMIT_OPTIONS = [50, 100, 200, 500];
+// ↑ Opciones de cuántas ofertas pedirle a Apify. El default es 200 porque es el
+//   default del backend (APIFY_MAX_RESULTS) y el que dio buenos resultados en la
+//   prueba real: pidió 50 y guardó 78, o sea que el número es un PISO y no un
+//   tope. Por eso no se ofrece "cuántas más越好": cada ejecución se factura y
+//   500 contra el mismo perfil devuelve casi lo mismo que 200.
+
 const SCORE_PRESETS = [0, 25, 50, 100];
 // ↑ Los cuatro valores rápidos. El 0 está primero a propósito: es el estado
 //   inicial (mostrar todo) y el que "limpia" cualquier valor personalizado.
@@ -70,6 +77,12 @@ export default function Toolbar({
   linkedinKeywords,
   minScore,
   onMinScoreChange,
+  apifyLimit,
+  onApifyLimitChange,
+  effectiveLimit,
+  savedMessage,
+  checkedAgo,
+  stats,
 }) {
   // ↑ Desestructuración completa de props en la firma: así no escribimos props.algo
   //   en el cuerpo. Cada prop viaja del padre (App) hacia acá.
@@ -153,8 +166,54 @@ export default function Toolbar({
 
   return (
     <div className="toolbar">
-      <div className="status">{statusText}</div>
-      {/* ↑ El texto de estado llega ya armado desde App (según qué se está viendo). */}
+      <div className="toolbar-status-column">
+        <div className="status">{statusText}</div>
+        {/* ↑ El texto de estado llega ya armado desde App (según qué se está viendo). */}
+        {checkedAgo && (
+          <div className="status-checked">🕒 Última búsqueda de LinkedIn: {checkedAgo}</div>
+          // ↑ "Actualizado hace X" con el helper timeAgo() de utils.js. Antes no
+          //   había ninguna forma de saber si lo de la pantalla era de ahora o de
+          //   ayer, que es justo lo que hace dudar de una lista de ofertas.
+        )}
+      </div>
+
+      {savedMessage && (
+        <div className={`save-banner${savedMessage.ok ? ' ok' : ' warn'}`} role="status">
+          {/* ↑ Confirmación de persistencia. El backend ya devuelve `saved`
+              ({ ok, total, message }) y antes nadie lo leía: el usuario no tenía
+              forma de saber si las ofertas se estaban guardando o no, que fue
+              media razón del reporte original. */}
+          <span aria-hidden="true">{savedMessage.ok ? '✓' : '⚠'}</span>
+          {savedMessage.text}
+        </div>
+      )}
+
+      {stats && (
+        <details className="stats-box">
+          {/* ↑ <details>/<summary> en vez de un panel siempre abierto: las stats
+              están para entender por qué se ven menos ofertas de las pedidas, y
+              ese dato importa una vez por búsqueda, no en cada scroll. */}
+          <summary>
+            ¿Por qué quedan {stats.guardados - stats.perdidas} ofertas y no {stats.pedidas}?
+          </summary>
+          {/* ↑ La pregunta está escrita como la duda real del usuario, con los
+              dos números de la corrida ya calculados: lo que quedó vs. lo que se
+              pidió. Con el filtro de % de match encima, el listado puede mostrar
+              menos todavía, y eso lo aclara el texto de estado de arriba. */}
+          <dl className="stats-grid">
+            {stats.items.map((item) => (
+              // ↑ Cada fila lleva su rótulo en castellano y, debajo, el por qué
+              //   del número: "sinLink: 3" no dice nada, "Sin link directo: 3
+              //   (no se pueden mostrar)" sí.
+              <div className="stat" key={item.label}>
+                <dt>{item.label}</dt>
+                <dd className={item.zero ? 'zero' : ''}>{item.value}</dd>
+                {item.hint && <span className="stat-hint">{item.hint}</span>}
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
 
       {/* Render condicional: los botones y el filtro de % solo aparecen en
           regiones de ofertas reales (no en Consultoras ni en Propuesta de Interés).
@@ -167,14 +226,40 @@ export default function Toolbar({
             {refreshing ? '🔄 Actualizando…' : '🔄 Actualizar búsqueda'}
             {/* ↑ Ternario: cambia el texto del botón mientras el refresh está corriendo. */}
           </button>
+            <label className="apify-limit-control">
+              {/* ↑ Cuántas ofertas pedirle a Apify. El número NO es un tope real
+                  de la plataforma: el backend pagina hasta 8 páginas y suele
+                  devolver MÁS de lo pedido (pedir 50 guardó 78 en la prueba real),
+                  así que el texto de al lado habla de "piso", no de "máximo". */}
+              <span className="apify-limit-label">Pedir</span>
+              <select
+                className="job-sort-select apify-limit-select"
+                value={apifyLimit}
+                onChange={(event) => onApifyLimitChange(Number(event.target.value))}
+                disabled={searchingLinkedIn}
+                aria-label="Cantidad de ofertas a pedirle a Apify"
+                title="Cantidad objetivo de ofertas. Es un piso, no un tope: el backend pagina y suele traer más."
+              >
+                {APIFY_LIMIT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              {/* ↑ 50/100/200/500. El default (200) es el mismo del backend
+                  (APIFY_MAX_RESULTS), así lo que se ve es lo que se ejecuta. */}
+            </label>
             <button
               className="btn small secondary"
               type="button"
               onClick={onLinkedInSearch}
               disabled={searchingLinkedIn}
-              title="Ejecuta una búsqueda manual en Apify, limitada a 50 resultados y con cobro por resultado."
+              // ↑ El costo se sigue avisando: cada búsqueda ejecuta un actor de
+              //   Apify que se factura por ejecución. Lo que se cambió fue el
+              //   número, que antes prometía un tope de 50 que ya no existe.
+              title="Ejecuta una búsqueda real en Apify y guarda lo que encuentre en tu base. Cada búsqueda se cobra, por eso conviene no repetirlas."
             >
-              {searchingLinkedIn ? 'Buscando en LinkedIn…' : 'Buscar con Apify · 50 máx.'}
+              {searchingLinkedIn
+                ? `Buscando en LinkedIn (${apifyLimit}+)…`
+                : `Buscar con Apify · desde ${apifyLimit} ofertas`}
             </button>
           <button
             className={`btn small secondary${viewMode === 'history' ? ' active' : ''}`}
@@ -197,6 +282,16 @@ export default function Toolbar({
           {/* ↑ Es un <a>, no un <button>: porque navega a una URL generada con
               las keywords + la región actual (sin scrapear nada). */}
         </div>
+
+        {effectiveLimit != null && !isConsulta && (
+          <div className="effective-limit">
+            {/* ↑ El límite REAL con el que corrió la última búsqueda. Se muestra
+                porque el texto del botón promete una cantidad y el backend puede
+                devolver MÁS (piso, no tope): sin este dato, ver 78 ofertas con un
+                botón que dice "desde 200" parece un error. */}
+            Última corrida: se pidieron {effectiveLimit} ofertas (es un piso: el backend pagina y suele traer más).
+          </div>
+        )}
 
         <div className="score-filter">
           {/* ↑ Fila propia del filtro de % de match. El CSS la manda a una línea

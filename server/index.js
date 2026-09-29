@@ -35,6 +35,10 @@ import { loadStatus, setStatus, ESTADOS } from './consultorasStore.js';
 // ↑ Analítica de mercado: demanda, brechas y recomendaciones automáticas
 import { buildAnalytics } from './analytics.js';
 import { searchLinkedInWithApify } from './apifyLinkedin.js';
+// ↑ Enriquece cada oferta con `portal` y `sourceUrl`. Se aplica en UN solo lugar
+//   (ver enrichJobs/enrichJob) para no tener que editar a mano las 57 entradas de
+//   curatedJobs.js ni las 5 fuentes de jobSources.js.
+import { withPortal } from './portal.js';
 
 // ↑ Resuelve la carpeta de este archivo para ubicar el resto de las rutas
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -95,6 +99,40 @@ let cache = { data: null, at: 0, online: false };
 const TTL = 30 * 60 * 1000;
 let refreshing = null; // evita refrescos simultáneos si se clickea 2 veces
 
+// Última respuesta de Apify, aplanada en UNA lista.
+// ↑ MOTIVACIÓN: las ofertas de LinkedIn viven fuera de la caché de getRanked()
+//   (nunca entraron en `cache.regions`), así que findById() las daba siempre por
+//   inexistentes y /api/job y /api/cover-letter respondían 404 con un id
+//   "linkedin-...". Guardando la última respuesta acá, esos endpoints pueden
+//   encontrar la oferta mientras la página siga abierta, sin tocar el contrato
+//   de findById ni la estructura de la caché. Es memoria, no disco: se pierde al
+//   reiniciar el server, y para eso está el historial (que ahora sí los guarda).
+let lastApifyJobs = [];
+
+/* -------------------- Enriquecimiento central de ofertas -------------------- */
+// ↑ UNICA fuente de `portal` y `sourceUrl` para TODO lo que sale al cliente.
+//   withPortal() devuelve una COPIA (nunca muta el original): los objetos de
+//   CURATED_JOBS, DEMO_JOBS y la caché de getRanked() son compartidos entre
+//   requests, y mutarlos haría que el `portal` de una request se filtrara a otra.
+function enrichJob(job) {
+  return withPortal(job);
+}
+
+// ↑ Enriquece una lista completa de ofertas. Tolera null/undefined para no tener
+//   que defensar en cada endpoint: una lista vacía devuelve una lista vacía.
+function enrichJobs(jobs) {
+  return Array.isArray(jobs) ? jobs.map((job) => withPortal(job)) : [];
+}
+
+// ↑ Enriquece un mapa { region: [ofertas] } entero, bucket por bucket.
+function enrichRegions(regions) {
+  const out = {};
+  for (const [region, list] of Object.entries(regions || {})) {
+    out[region] = enrichJobs(list);
+  }
+  return out;
+}
+
 // Devuelve { regions, _online } con datos DEMO como respaldo cuando las fuentes
 // en vivo están bloqueadas o no devuelven ofertas. Así la app funciona siempre.
 // force=true ignora el cache y vuelve a consultar las fuentes ahora mismo
@@ -146,11 +184,16 @@ async function getRanked(force = false) {
     } else {
       // Solo se guarda en el historial cuando hay datos reales
       // (evita ensuciar el historial con ofertas demo).
-      // ↑ Persiste las ofertas vistas SOLO si son datos reales (no demo)
+      // ↑ Persiste las ofertas vistas SOLO si son datos reales (no demo).
+      //   El catch NO está vacío a propósito: antes el `catch {}` se tragaba el
+      //   error sin decir nada, así que cuando el historial dejó de guardarse no
+      //   había forma de saberlo (era el síntoma de un disco lleno o de permisos).
+      //   Guardar en el historial es secundario: si falla, la búsqueda responde
+      //   igual y el error queda en la consola para diagnosticarlo.
       try {
         await recordSearch(ranked);
-      } catch {
-        // si falla el guardado en disco, no bloquea la búsqueda
+      } catch (err) {
+        console.error('[busqueda] No se pudo guardar el historial:', err?.message || err);
       }
     }
     // ↑ Guarda el resultado fresco en la caché junto con su timestamp
@@ -172,6 +215,14 @@ function findById(data, id) {
     const f = list.find((j) => j.id === id);
     if (f) return f;
   }
+  // ↓ FALLBACK: las ofertas recién llegadas de Apify. No están en data.regions
+  //   (viven en lastApifyJobs) y antes esto devolvía null siempre, así que el
+  //   modal de detalle y la carta de presentación de cualquier oferta de
+  //   LinkedIn degradaban a 404 aunque la oferta estuviera en pantalla.
+  //   La firma NO cambia: sigue siendo findById(data, id) y el resultado tiene la
+  //   misma forma, así que los endpoints no se enteran de esta diferencia.
+  const fromApify = lastApifyJobs.find((j) => j.id === id);
+  if (fromApify) return fromApify;
   return null;
 }
 
@@ -200,7 +251,8 @@ const server = createServer(async (req, res) => {
     // ↑ Obtiene (o reutiliza de caché) la búsqueda completa
     const data = await getRanked();
     // ↑ Filtra las ofertas de la región pedida (o lista vacía si no hay)
-    const jobs = data.regions[region] || [];
+    //   y las enriquece con portal + sourceUrl en el camino de salida
+    const jobs = enrichJobs(data.regions[region] || []);
     return sendJSON(res, 200, { region, jobs, total: jobs.length, _online: data._online });
   }
   // ↑ Endpoint /api/job: detalle de UNA oferta + resumen de empresa/skills
@@ -211,20 +263,25 @@ const server = createServer(async (req, res) => {
     const found = findById(data, query);
     // ↑ Si el id no existe entre las ofertas, respondemos 404
     if (!found) return sendJSON(res, 404, { error: 'not found' });
+    // ↑ Enriquecimiento también acá: el detalle de una oferta es el primer lugar
+    //   donde se muestra el portal y el link de re-búsqueda al usuario.
+    const job = enrichJob(found);
     // ↑ Devuelve la oferta completa más el resumen que usa la carta
-    return sendJSON(res, 200, { job: found, summary: summarize(found) });
+    return sendJSON(res, 200, { job, summary: summarize(job) });
   }
   // ↑ Endpoint /api/cover-letter: genera la carta de presentación (es/en)
   if (url.pathname === '/api/cover-letter') {
-    // ↑ Lee región e id de la oferta desde el query de la URL
+    // ↑ Lee región e id de la oferta desde el query de la URL.
+    //   `id` es el parámetro histórico; `q` se acepta como alias para que no
+    //   falle si el frontend usa el mismo nombre que en /api/job.
     const region = url.searchParams.get('region') || 'argentina';
-    const id = url.searchParams.get('id') || '';
+    const id = url.searchParams.get('id') || url.searchParams.get('q') || '';
     const data = await getRanked();
     const found = findById(data, id);
     // ↑ Si no encuentra la oferta, devuelve 404
     if (!found) return sendJSON(res, 404, { error: 'not found' });
     // ↑ Arma la carta completa (idioma + asunto + cuerpo) y la envía
-    return sendJSON(res, 200, generateCoverLetter(found, region));
+    return sendJSON(res, 200, generateCoverLetter(enrichJob(found), region));
   }
   // ↑ Endpoint /api/refresh: fuerza una búsqueda nueva, ignorando la caché
   if (url.pathname === '/api/refresh' && req.method === 'POST') {
@@ -240,8 +297,55 @@ const server = createServer(async (req, res) => {
       return sendJSON(res, 400, { error: 'Solicitud JSON inválida.' });
     }
     try {
-      const data = await searchLinkedInWithApify(body.region || 'argentina');
-      return sendJSON(res, 200, data);
+      // ↑ `limit` es opcional: si viene en el body manda sobre APIFY_MAX_RESULTS
+      //   (ver maxResults() en apifyLinkedin.js). Si no viene, se resuelve solo.
+      const data = await searchLinkedInWithApify(body.region || 'argentina', { limit: body.limit });
+      // ↑ Se guarda la respuesta COMPLETA (todos los buckets) para que /api/job y
+      //   /api/cover-letter puedan resolver un id "linkedin-..." mientras la página
+      //   siga abierta. Antes findById() solo miraba getRanked() y daba 404 siempre.
+      lastApifyJobs = Object.values(data.regions || {}).flat();
+
+      /* -------- Guardado en el historial (lo que NUNCA pasaba antes) -------- */
+      // ↑ BUG CRÍTICO QUE ESTO ARREGLA: este handler respondía y listo, sin llamar
+      //   a recordSearch(). Las ofertas de Apify vivían solo en el estado de React y
+      //   se perdían con un F5, al cambiar de región o al tocar "Actualizar".
+      //   Con 229 entradas en data/history.json y cero de source "LinkedIn / Apify"
+      //   estaba claro: ni una sola oferta de LinkedIn llegó a persistirse.
+      //   Se registran TODOS los buckets, no solo el pedido: si se guarda solo
+      //   `data.jobs`, las ofertas que assignRegion() metió en otra región (por
+      //   ejemplo una de location "Berlin" en una búsqueda de Argentina) se
+      //   seguirían perdiendo, que es justamente lo que pasó siempre.
+      let saved;
+      try {
+        const history = await recordSearch(data.regions || {});
+        const total = Object.keys(history?.entries || {}).length;
+        saved = {
+          ok: true,
+          total,
+          message: `Se guardaron ${data.total} ofertas de LinkedIn en el historial. Ahora tiene ${total} ofertas en total.`,
+        };
+      } catch (err) {
+        // ↓ Si falla el guardado NO se rompe la búsqueda: el usuario ya pagó la
+        //   ejecución de Apify y tiene las ofertas en pantalla. Pero tampoco se
+        //   traga el error en silencio (que era lo que pasaba con el `catch {}`
+        //   de getRanked): queda en la respuesta y en la consola, para que el
+        //   frontend pueda avisarle y para que quede registro de qué pasó.
+        console.error('[linkedin-search] No se pudo guardar en el historial:', err?.message || err);
+        saved = {
+          ok: false,
+          total: 0,
+          message: `La búsqueda funcionó, pero las ofertas NO se guardaron en el historial: ${err?.message || 'error desconocido'}.`,
+        };
+      }
+
+      // ↑ Los tres jobs (bucket pedido, todos los buckets y el detalle de lo
+      //   perdido) salen ya enriquecidos con portal + sourceUrl.
+      return sendJSON(res, 200, {
+        ...data,
+        jobs: enrichJobs(data.jobs),
+        regions: enrichRegions(data.regions),
+        saved,
+      });
     } catch (error) {
       return sendJSON(res, error.statusCode || 502, { error: error.message || 'Falló la búsqueda de LinkedIn.' });
     }
@@ -252,7 +356,9 @@ const server = createServer(async (req, res) => {
     const region = url.searchParams.get('region') || 'argentina';
     try {
       const jobs = await getHistoryForRegion(region);
-      return sendJSON(res, 200, { region, jobs });
+      // ↑ Se enriquece también el historial: son las MISMAS ofertas que ve el
+      //   usuario, y si el portal no estuviera acá, las guardadas no lo tendrían.
+      return sendJSON(res, 200, { region, jobs: enrichJobs(jobs) });
     } catch {
       // ↑ Si algo falla, se responde una lista vacía en vez de romper la app
       return sendJSON(res, 200, { region, jobs: [] });

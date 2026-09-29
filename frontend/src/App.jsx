@@ -28,7 +28,9 @@ import JobDetailModal from './components/JobDetailModal.jsx';
 import LetterModal from './components/LetterModal.jsx';
 // ↑ Modal que muestra la carta de presentación generada y la deja copiar/descargar.
 
-import { linkedinProfileKeywords } from './utils.js';
+import { linkedinProfileKeywords, timeAgo } from './utils.js';
+// ↑ linkedinProfileKeywords arma la query de la búsqueda de LinkedIn;
+//   timeAgo convierte el `checkedAt` del backend en "actualizado hace X".
 
 import {
   loadProfile, loadJobs, loadHistory, refreshJobs,
@@ -39,6 +41,79 @@ import {
 
 // Estados posibles de contacto de una consultora. Se usan como opciones del tracker.
 const DEFAULT_ESTADOS = ['Sin contactar', 'Contactado', 'Respondió', 'Entrevista agendada', 'Descartada'];
+
+// Nombres de las regiones para poder hablar de "otras regiones" sin mostrar claves
+// internas como 'argentina' o 'eeuu' en un texto que lee el usuario.
+// ↑ Las 7 claves son fijas (ver AGENTS.md): si alguna vez se agrega una región,
+//   esta tabla es el lugar que hay que tocar en el frontend.
+const REGION_NAMES = {
+  argentina: 'Argentina',
+  europa: 'Europa',
+  eeuu: 'EE.UU.',
+  mexico: 'México',
+  peru: 'Perú',
+  colombia: 'Colombia',
+  chile: 'Chile',
+};
+
+// Traduce el objeto `stats` del backend a las filas que muestra el <details>.
+// ↑ ¿POR QUÉ EXISTE ESTA TABLA? Porque `stats` viene en inglés y en claves cortas
+//   (recibidos, sinLink, viejas, sinMatch, otrasRegiones): mostrarlo crudo sería
+//   "recibidos 100 / sinLink 3", que no responde la pregunta del usuario ("¿por
+//   qué veo 60 y no 200?"). Cada fila tiene su etiqueta en castellano y una
+//   frase corta que explica POR QUÉ se perdió cada cosa.
+//   Se devuelve el total perdido además del detalle, porque la pregunta del
+//   <summary> se arma con esa resta y no con `stats.total` (que no existe).
+function buildStatsReport(meta) {
+  const stats = meta?.stats;
+  if (!stats) return null;
+
+  const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  // ↑ Number() con Number.isFinite: el backend manda números, pero un stats
+  //   viejo o truncado no debe romper el render con "NaN ofertas perdidas".
+
+  const otras = Object.entries(meta.regions || {})
+    // ↓ Se recorren los buckets para poder NOMBRAR las otras regiones con
+    //   ofertas, no solo contarlas. `stats.otrasRegiones` ya viene calculado;
+    //   esto solo agrega el detalle de dónde quedaron.
+    .filter(([key, list]) => key !== meta.origin && Array.isArray(list) && list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  const items = [
+    { label: 'Le pedimos a LinkedIn', value: num(stats.recibidos), hint: 'ofertas crudas' },
+    { label: 'Sin link directo', value: num(stats.sinLink), hint: 'no se pueden mostrar' },
+    { label: 'Muy viejas', value: num(stats.viejas), hint: 'fuera de la ventana de 30 días' },
+    { label: 'Repetidas', value: num(stats.duplicados), hint: 'la misma oferta en dos páginas' },
+    { label: 'Sin match con tu CV', value: num(stats.sinMatch), hint: 'no son de QA o no coinciden' },
+    {
+      label: 'En otra región',
+      value: num(stats.otrasRegiones),
+      hint: otras.length ? otras.map(([key, list]) => `${REGION_NAMES[key] || key} (${list.length})`).join(', ') : 'ninguna',
+    },
+  ].map((item) => ({ ...item, zero: item.value === 0 }));
+  // ↑ `zero` marca las filas en cero para que el CSS las atenúe: lo que vale la
+  //   pena mirar es dónde se perdieron ofertas, no una lista de ceros.
+
+  const perdidas = num(stats.sinLink) + num(stats.viejas) + num(stats.duplicados) + num(stats.sinMatch) + num(stats.otrasRegiones);
+  // ↑ Los cinco motivos de descarte, sumados. La resta del <summary> es
+  //   guardados - perdidas, NO recibidos - pedidas: los recibidos incluyen los
+  //   duplicados, que también se descartaron, y con la otra cuenta el número del
+  //   summary no cerraba con ninguna de las filas de la tabla.
+  // ↑ La resta del <summary> se hace con ESTOS cinco, no con recibidos - pedido:
+  //   `stats.recibidos` incluye duplicados que sí se descartaron, y pedir - recibidas
+  //   daba un número que no cerraba con ninguna de las filas de arriba.
+
+  return {
+    pedidas: num(meta.resultLimit) || 0,
+    guardados: num(stats.guardados),
+    perdidas,
+    items,
+  };
+  // ↑ No se manda la cantidad que quedó en pantalla a propósito: esa lista pasa
+  //   por el filtro de % de match, así que su número mezcla dos cosas (lo que
+  //   descartó Apify y lo que filtró el usuario). Por eso el <summary> habla de
+  //   la corrida, y el total filtrado ya está en el texto de estado de arriba.
+}
 
 function getSavedTheme() {
   try {
@@ -119,6 +194,28 @@ export default function App() {
 
   const [searchingLinkedIn, setSearchingLinkedIn] = useState(false);
   const [linkedinSearchError, setLinkedInSearchError] = useState('');
+  // ↑ Mensaje de error de la búsqueda de Apify, si la hubo. Va aparte de
+  //   `linkedinMeta` a propósito: un error pertenece a UNA corrida, y si se
+  //   mezclara con los metadatos el error viejo aparecería junto a los datos
+  //   nuevos de la corrida que sí funcionó.
+
+  const [apifyLimit, setApifyLimit] = useState(200);
+  // ↑ Cuántas ofertas pedirle a Apify. 200 es el default del backend
+  //   (APIFY_MAX_RESULTS), no un número inventado acá: el control de la
+  //   toolbar manda este valor en el POST, así que lo que se ve es lo que corre.
+
+  const [refreshNote, setRefreshNote] = useState('');
+  // ↑ Aviso del botón "Actualizar búsqueda". Existe porque ese botón NO llama a
+  //   Apify: solo re-consulta las fuentes gratuitas. Sin esta nota, tocarlo
+  //   reemplazaba en silencio la lista de Apify por la de las gratuitas.
+
+  const [linkedinMeta, setLinkedinMeta] = useState(null);
+  // ↑ Metadatos de la ÚLTIMA corrida de Apify: { saved, stats, checkedAt,
+  //   resultLimit, regions }. Antes no se guardaba nada de esto, y por eso el
+  //   usuario no tenía forma de saber si lo que veía se había guardado.
+  //   `regions` además sirve para no perder las ofertas que el backend metió en
+  //   OTRO bucket que el pedido: la respuesta trae los 7 y `jobs` es solo el
+  //   pedido, así que guardar solo `jobs` perdía parte de lo que se pagó.
 
   const [selectedJob, setSelectedJob] = useState(null); // { job, summary, region }
   // ↑ Oferta seleccionada para abrir el modal de detalle. null = modal cerrado.
@@ -190,10 +287,27 @@ export default function App() {
     // Cualquier otra tab es un país: buscamos las ofertas según la vista activa
     // (live = resultados frescos, history = historial guardado).
     setLoading(true);
-    const data = viewMode === 'history' ? await loadHistory(nextRegion) : await loadJobs(nextRegion);
-    setJobsData(data);
+    const apifyBucket = viewMode === 'live' ? linkedinMeta?.regions?.[nextRegion] : null;
+    // ↓ Si la última corrida de Apify dejó ofertas PARA ESTA REGIÓN, se muestran
+    //   esas y no se vuelve a pegarle al backend. Motivo: son más frescas que
+    //   /api/jobs (que no incluye Apify) y el usuario ya las pagó. Sin esto, el
+    //   aviso "Además hay N en Europa" del status sería mentira apenas se cambia
+    //   de pestaña: la lista se reemplazaba por las fuentes gratuitas.
+    if (apifyBucket && apifyBucket.length) {
+      setJobsData({
+        region: nextRegion,
+        jobs: apifyBucket,
+        _online: true,
+        source: 'LinkedIn / Apify',
+        checkedAt: linkedinMeta.checkedAt,
+        fromApify: true,
+      });
+      setRefreshNote('');
+    } else {
+      setJobsData(viewMode === 'history' ? await loadHistory(nextRegion) : await loadJobs(nextRegion));
+    }
     setLoading(false);
-  }, [viewMode]);
+  }, [viewMode, linkedinMeta]);
 
   // Callback que recibe el % de match mínimo elegido en la toolbar. Es la
   // SEGUNDA capa de validación: el Toolbar ya no deja pasar valores fuera de
@@ -217,41 +331,110 @@ export default function App() {
   // (ignorando la caché de 30 min) y recarga la región actual.
   async function handleRefresh() {
     setRefreshing(true);
-    await refreshJobs();
-    // ↑ En la pestaña Propuesta de Interés, el refresh debe recalcular la analítica
-    //   (no hay ofertas de una región que recargar como en las pestañas de países).
+    const result = await refreshJobs();
+    // ↑ refreshJobs() ahora devuelve { ok }. Antes era fire-and-forget: si el
+    //   POST fallaba, la lista se recargaba igual y la pantalla juraba que
+    //   estaba actualizada cuando en realidad seguía con lo viejo.
+    if (result && result.ok === false) {
+      setRefreshNote('No se pudo actualizar: el backend no respondió. La lista que ves es la anterior.');
+    }
+    // ↑ Aviso explícito en vez de dejar la pantalla mintiendo con "recién
+    //   actualizado". No bloquea nada: los datos que ya están siguen sirven.
+    // En la pestaña Propuesta de Interés, el refresh debe recalcular la analítica
+    // (no hay ofertas de una región que recargar como en las pestañas de países).
     if (region === 'analisis') {
       setAnalytics(await loadAnalytics());
+    } else if (viewMode === 'history') {
+      setJobsData(await loadHistory(region));
+    } else if (jobsData.fromApify) {
+      // ↓ CASO QUE ANTES PERDÍA DATOS: "Actualizar búsqueda" llama a
+      //   POST /api/refresh, que re-consulta SOLO las fuentes gratuitas. La lista
+      //   en pantalla venía de Apify, así que recargarla la reemplazaba entera
+      //   por las gratuitas y las ofertas que el usuario pagó desaparecían de la
+      //   vista (seguían en el historial, pero en pantalla no había rastro).
+      //   Ahora se respeta lo que se está viendo y se explica qué pasó.
+      setRefreshNote('Se actualizaron las fuentes gratuitas, pero la lista que ves viene de Apify y se mantiene: las ofertas de Apify no se vuelven a traer sin pagar otra ejecución. Ya están guardadas en tu base, así que las podés ver con "Desde enero 2026".');
+      // ↑ NO se reemplaza jobsData. Reemplazarla era justo lo que hacía
+      //   desaparecer de la pantalla lo que el usuario había pagado. Los datos
+      //   frescos de las gratuitas quedan disponibles en cuanto el usuario
+      //   vuelva a una lista normal (cambiar de región o tocar Apify).
     } else {
-      const data = viewMode === 'history' ? await loadHistory(region) : await loadJobs(region);
-      setJobsData(data);
+      setJobsData(await loadJobs(region));
     }
     setRefreshing(false);
   }
 
   async function handleLinkedInSearch() {
     setSearchingLinkedIn(true);
-    setLinkedInSearchError('');
+    setLinkedinSearchError('');
+    setRefreshNote('');
+    // ↑ Se borra la nota del refresh anterior: con la corrida nueva queda
+    //   obsoleto un mensaje que decía "esto no lo toqué".
     try {
-      const data = await searchLinkedInJobs(region);
-      setJobsData(data);
+      const data = await searchLinkedInJobs(region, apifyLimit);
+      // ↑ Se manda el limit de la toolbar. Ojo con el contrato: la respuesta
+      //   trae MÁS de lo pedido (el backend pagina hasta 8 páginas), así que
+      //   `total` NO tiene que coincidir con lo que dice el botón.
+
+      // ↓ Se guarda la respuesta COMPLETA en `linkedinMeta` y NO en jobsData.
+      //   Antes era al revés y por eso la lista se perdía: `jobs` es solo el
+      //   bucket pedido, mientras que `regions` trae los siete. Guardar solo
+      //   `jobs` descartaba las ofertas que assignRegion() metió en otro
+      //   bucket (una de location "Berlin" en una búsqueda de Argentina), que
+      //   es exactamente el dato que el usuario pagó y no veía.
+      setLinkedinMeta({
+        saved: data.saved || null,
+        stats: data.stats || null,
+        checkedAt: data.checkedAt || null,
+        resultLimit: data.resultLimit || null,
+        regions: data.regions || {},
+        origin: region,
+        // ↑ `origin`: la región para la que se buscó. Sirve para distinguir
+        //   "el usuario pidió Argentina" de "el bucket se llama Argentina".
+      });
+
+      // ↓ Y la lista visible sale del bucket pedido, para no mezclar de golpe
+      //   78 ofertas con las de las fuentes gratuitas.
+      setJobsData({
+        region: data.region,
+        jobs: data.jobs || [],
+        _online: data._online,
+        source: data.source,
+        checkedAt: data.checkedAt,
+        fromApify: true,
+        // ↑ Marca de que esta lista viene de Apify. La usa handleRefresh() para
+        //   NO pisar esta lista con las fuentes gratuitas sin avisar.
+      });
       setViewMode('live');
     } catch (error) {
-      setLinkedInSearchError(error.message || 'No se pudo buscar en LinkedIn.');
+      setLinkedinSearchError(error.message || 'No se pudo buscar en LinkedIn.');
     } finally {
       setSearchingLinkedIn(false);
     }
   }
 
-  // Alterna entre vista live y historial, y recarga los datos que correspondan.
+  // Alterna entre vista live e historial, y recarga los datos que correspondan.
+  // OJO: al volver de historial a "live" NO se sobreescribe lo que hay: si la
+  // última búsqueda fue la de Apify, esa lista sigue en pantalla y las ofertas
+  // ya están en el historial, así que no hay nada que recargar.
   async function handleToggleHistory() {
     const next = viewMode === 'history' ? 'live' : 'history';
     setViewMode(next);
     if (region === 'analisis') return;
     // ↑ En Propuesta de Interés solo cambia la vista global; su contenido no depende del historial.
     setLoading(true);
-    const data = next === 'history' ? await loadHistory(region) : await loadJobs(region);
-    setJobsData(data);
+    if (next === 'history') {
+      setJobsData(await loadHistory(region));
+    } else if (jobsData.fromApify && region === linkedinMeta?.origin) {
+      // ↓ Al volver a "live" después de mirar el historial: si lo que se estaba
+      //   viendo era la corrida de Apify, NO se toca jobsData. Antes se llamaba a
+      //   loadJobs() siempre, y eso reemplazaba las ofertas de Apify por las de
+      //   las fuentes gratuitas cada vez que se alternaba la vista: de ahí la
+      //   sensación de "se me pierden". Acá ya están en el historial igual, pero
+      //   en pantalla tiene que seguir viéndose lo que el usuario_BUSCÓ.
+    } else {
+      setJobsData(await loadJobs(region));
+    }
     setLoading(false);
   }
 
@@ -305,6 +488,39 @@ export default function App() {
   //   "sin filtro": así nunca desaparecen ofertas por un dato que no vino.
   //   El .filter NO modifica el arreglo original: devuelve uno nuevo.
 
+  // Resumen de la última corrida de Apify para la toolbar: confirmación de
+  // guardado, "actualizado hace X" y las estadísticas plegables.
+  // ↑ Se arma acá y no en Toolbar porque necesita saber si la corrida fue la que
+  //   se está mirando: mostrar "se guardaron N ofertas" mientras se ve otra
+  //   región sería mentir.
+  const linkedinReport = useMemo(() => {
+    if (!linkedinMeta) return { saved: null, checkedAgo: '', stats: null, effectiveLimit: null };
+    // ↑ Sin corrida todavía no hay nada que mostrar: cero banner, cero stats.
+
+    const saved = linkedinMeta.saved
+      ? {
+        ok: Boolean(linkedinMeta.saved.ok),
+        // ↑ El backend ya manda un `message` en español; se usa ese texto y
+        //   solo se agrega el prefijo con el ícono, para no tener dos frases
+        //   distintas diciendo lo mismo.
+        text: linkedinMeta.saved.message || (linkedinMeta.saved.ok
+          ? `Se guardaron ${linkedinMeta.saved.total} ofertas en tu base.`
+          : 'La búsqueda funcionó pero las ofertas NO se guardaron.'),
+      }
+      : null;
+    // ↑ null cuando el backend no mandó `saved`: es un caso distinto de "se
+    //   guardaron 0" y tiene que verse distinto (nada vs. "no se pudo guardar").
+
+    return {
+      saved,
+      checkedAgo: timeAgo(linkedinMeta.checkedAt) || '',
+      effectiveLimit: linkedinMeta.resultLimit || null,
+      stats: buildStatsReport(linkedinMeta),
+    };
+  }, [linkedinMeta, visibleJobs.length]);
+  // ↑ useMemo porque se recalcula en cada render y solo depende de dos cosas:
+  //   la corrida y cuántas ofertas quedan tras el filtro de % de match.
+
   // Frase que se le agrega al texto de estado para que se vea qué hizo el filtro.
   function filterSummary() {
     if (minScore <= 0) return '';
@@ -329,12 +545,31 @@ export default function App() {
       return loading ? 'Calculando la propuesta de interés…' : 'Mercado QA relevado en todas las regiones, comparado contra tu CV.';
     }
     if (loading) return 'Cargando…';
-    if (searchingLinkedIn) return 'Consultando LinkedIn con Apify (máximo 50 resultados)…';
+    if (searchingLinkedIn) return `Consultando LinkedIn con Apify (desde ${apifyLimit} ofertas; puede devolver más)…`;
+      // ↑ El "máximo 50" de antes era mentira: el backend pagina hasta 8 páginas.
+        //   Y no dice "cuántas vas a ver" sino "desde cuántas", porque el número
+        //   pedido es un piso (en la prueba real: pedí 50, quedaron 78).
     if (linkedinSearchError) return `Búsqueda de LinkedIn: ${linkedinSearchError}`;
-    if (jobsData.source === 'LinkedIn / Apify') {
-      return `${visibleJobs.length} ofertas de LinkedIn, filtradas a los últimos 30 días.${filterSummary()}`;
-      // ↑ El conteo usa la lista YA filtrada: el usuario ve cuántas quedan, no cuántas
-      //   hay, y la frase del filtro aclara el total por si quedó alguna duda.
+    if (refreshNote) return refreshNote;
+      // ↑ El aviso del refresh va antes que el conteo porque explica una
+        //   anomalía de la lista actual: si no, se lee como que la pantalla está
+        //   rota. Es un return temprano solo cuando hay nota.
+    if (jobsData.fromApify) {
+      const otras = Object.entries(linkedinMeta?.regions || {}).filter(
+        // ↓ Se excluye la región QUE SE ESTÁ VIENDO, no la que se pidió en la
+        //   corrida: si el usuario ya está en la pestaña Europa, el aviso tiene
+        //   que ofrecerle las demás, no las de Europa que ya está mirando.
+        ([key, list]) => key !== region && Array.isArray(list) && list.length > 0,
+      );
+      // ↑ Aviso de las ofertas que el backend metió en OTROS buckets. No se
+      //   pierden: están en `regions` y se ven al cambiar de pestaña (goToRegion
+      //   las restaura), pero antes no había forma de saber que existían.
+      const extra = otras.length
+        ? ` Además hay ${otras.reduce((acc, [, list]) => acc + list.length, 0)} en ${otras.map(([key]) => REGION_NAMES[key] || key).join(', ')}.`
+        : '';
+      return `${visibleJobs.length} ofertas de LinkedIn (Apify) de ${REGION_NAMES[region] || region}, de los últimos 30 días.${extra}${filterSummary()}`;
+      // ↑ El conteo usa la lista YA filtrada: el usuario ve cuántas quedan, no
+      //   cuántas hay, y filterSummary() aclara el total por si quedó duda.
     }
     if (viewMode === 'history') {
       return `Historial de los últimos 6 meses · ${visibleJobs.length} ofertas · las más viejas se purgan solas. “No aparece” no confirma cobertura.${filterSummary()}`;
@@ -393,6 +628,18 @@ export default function App() {
             linkedinKeywords={linkedinKeywords}
             minScore={minScore}
             onMinScoreChange={handleMinScoreChange}
+            apifyLimit={apifyLimit}
+            onApifyLimitChange={setApifyLimit}
+            // ↑ El select de cuántas ofertas pedir: el estado vive en App porque
+            //   es App la que hace el POST. La toolbar solo avisa el valor nuevo.
+            effectiveLimit={linkedinReport.effectiveLimit}
+            // ↑ El límite REAL de la última corrida (`resultLimit` del backend),
+            //   que puede diferir del elegido si el backend lo acota.
+            savedMessage={linkedinReport.saved}
+            checkedAgo={linkedinReport.checkedAgo}
+            stats={linkedinReport.stats}
+            // ↑ Los tres reportes de la corrida (guardado, hora y estadísticas).
+            //   Ya venían en la respuesta del backend y nadie los leía.
           />
           {/* ↑ La toolbar recibe por props el estado y los callbacks; los hijos no
               modifican el estado del padre directamente, solo "avisan" con eventos.
