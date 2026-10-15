@@ -100,20 +100,19 @@ No es una API gratuita como las demás fuentes.
 - Si agregás un endpoint, actualizá la tabla de la API del `README.md` (el README es
   la documentación real del proyecto y está más completo que `DOCUMENTACION.md`).
 
-## Estado actual (verificado al 2026-09-29)
+## Estado actual (verificado al 2026-10-15)
 
-Hay trabajo **aplicado en el working tree pero sin commitear** que cambia el contrato:
-
-- Ya está en `server/`: el límite de Apify es configurable (`APIFY_MAX_RESULTS`, default
-  200, clamp 20..1000, paginado hasta 8 páginas), `/api/linkedin-search` **sí** persiste
-  en el historial y devuelve `{ jobs, regions, stats, saved, checkedAt }`, existe
-  `server/portal.js`, y `history.js` recuperó del `.bak` y dejó de colisionar la clave.
-- **El frontend todavía NO consume nada de eso**: `Toolbar.jsx` sigue diciendo
-  "limitada a 50 resultados" (ya es falso), y `JobList.jsx` / `JobDetailModal.jsx` no
-  renderizan `portal`, `sourceUrl`, `saved` ni `stats`. Es el trabajo pendiente natural.
+- El límite de LinkedIn es configurable (`APIFY_MAX_RESULTS`, default 200, clamp 20..1000).
+  El actor recibe **una sola URL**: `limitPerSource` es un máximo por URL y enviar varias
+  páginas con el mismo valor multiplicaba el volumen, pudiendo agotar el timeout síncrono.
+- `/api/linkedin-search` persiste las ofertas y devuelve `{ jobs, regions, stats, saved,
+  checkedAt }`; la UI permite elegir el límite, muestra el estado/estadísticas y renderiza
+  el portal y los links de oferta/búsqueda.
+- `server/portal.js` enriquece las ofertas con `portal` y `sourceUrl`; `history.js` recupera
+  del `.bak` y evita colisiones de clave.
 - `.github/workflows/` tiene 3 workflows (`ci.yml`, `deploy-pages.yml`, `docker.yml`).
   El `Dockerfile` es multi-stage y **depende de que el build quede exactamente en
   `frontend/dist`**: si se copia a otro lado, la API sigue andando pero los assets dan 404.
 
-Esto es el resumen; el detalle de cada punto, con los `archivo:línea` del diagnóstico,
-está en [`MEMORIA.md`](MEMORIA.md) secciones 3 y 4. Actualizá los dos juntos si cambia.
+El diagnóstico de la multiplicación del límite y lo que se verificó está en
+[`MEMORIA.md`](MEMORIA.md). Actualizá ambos archivos si cambia este comportamiento.

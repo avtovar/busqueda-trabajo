@@ -18,10 +18,8 @@ import { linkedinSearchUrl } from '../utils.js';
 
 const APIFY_LIMIT_OPTIONS = [50, 100, 200, 500];
 // ↑ Opciones de cuántas ofertas pedirle a Apify. El default es 200 porque es el
-//   default del backend (APIFY_MAX_RESULTS) y el que dio buenos resultados en la
-//   prueba real: pidió 50 y guardó 78, o sea que el número es un PISO y no un
-//   tope. Por eso no se ofrece "cuántas más越好": cada ejecución se factura y
-//   500 contra el mismo perfil devuelve casi lo mismo que 200.
+//   default del backend (APIFY_MAX_RESULTS). Cada valor es el máximo que se
+//   solicita en una sola búsqueda; Apify factura por resultados y no solo por corrida.
 
 const SCORE_PRESETS = [0, 25, 50, 100];
 // ↑ Los cuatro valores rápidos. El 0 está primero a propósito: es el estado
@@ -194,7 +192,7 @@ export default function Toolbar({
               están para entender por qué se ven menos ofertas de las pedidas, y
               ese dato importa una vez por búsqueda, no en cada scroll. */}
           <summary>
-            ¿Por qué quedan {stats.guardados - stats.perdidas} ofertas y no {stats.pedidas}?
+            LinkedIn entregó {stats.enRegion} ofertas de hasta {stats.pedidas} solicitadas.
           </summary>
           {/* ↑ La pregunta está escrita como la duda real del usuario, con los
               dos números de la corrida ya calculados: lo que quedó vs. lo que se
@@ -227,10 +225,8 @@ export default function Toolbar({
             {/* ↑ Ternario: cambia el texto del botón mientras el refresh está corriendo. */}
           </button>
             <label className="apify-limit-control">
-              {/* ↑ Cuántas ofertas pedirle a Apify. El número NO es un tope real
-                  de la plataforma: el backend pagina hasta 8 páginas y suele
-                  devolver MÁS de lo pedido (pedir 50 guardó 78 en la prueba real),
-                  así que el texto de al lado habla de "piso", no de "máximo". */}
+              {/* ↑ El actor recibe el límite por una sola URL; así el valor no se
+                  multiplica entre varias páginas de búsqueda. */}
               <span className="apify-limit-label">Pedir</span>
               <select
                 className="job-sort-select apify-limit-select"
@@ -238,14 +234,13 @@ export default function Toolbar({
                 onChange={(event) => onApifyLimitChange(Number(event.target.value))}
                 disabled={searchingLinkedIn}
                 aria-label="Cantidad de ofertas a pedirle a Apify"
-                title="Cantidad objetivo de ofertas. Es un piso, no un tope: el backend pagina y suele traer más."
+                title="Máximo de ofertas que se solicitarán en esta búsqueda. LinkedIn puede devolver menos."
               >
                 {APIFY_LIMIT_OPTIONS.map((option) => (
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
-              {/* ↑ 50/100/200/500. El default (200) es el mismo del backend
-                  (APIFY_MAX_RESULTS), así lo que se ve es lo que se ejecuta. */}
+              {/* ↑ El default (200) coincide con APIFY_MAX_RESULTS del backend. */}
             </label>
             <button
               className="btn small secondary"
@@ -253,13 +248,12 @@ export default function Toolbar({
               onClick={onLinkedInSearch}
               disabled={searchingLinkedIn}
               // ↑ El costo se sigue avisando: cada búsqueda ejecuta un actor de
-              //   Apify que se factura por ejecución. Lo que se cambió fue el
-              //   número, que antes prometía un tope de 50 que ya no existe.
+              //   Apify y el volumen solicitado puede afectar el costo.
               title="Ejecuta una búsqueda real en Apify y guarda lo que encuentre en tu base. Cada búsqueda se cobra, por eso conviene no repetirlas."
             >
               {searchingLinkedIn
-                ? `Buscando en LinkedIn (${apifyLimit}+)…`
-                : `Buscar con Apify · desde ${apifyLimit} ofertas`}
+                ? `Buscando en LinkedIn (hasta ${apifyLimit})…`
+                : `Buscar con Apify · hasta ${apifyLimit}`}
             </button>
           <button
             className={`btn small secondary${viewMode === 'history' ? ' active' : ''}`}
@@ -285,11 +279,9 @@ export default function Toolbar({
 
         {effectiveLimit != null && !isConsulta && (
           <div className="effective-limit">
-            {/* ↑ El límite REAL con el que corrió la última búsqueda. Se muestra
-                porque el texto del botón promete una cantidad y el backend puede
-                devolver MÁS (piso, no tope): sin este dato, ver 78 ofertas con un
-                botón que dice "desde 200" parece un error. */}
-            Última corrida: se pidieron {effectiveLimit} ofertas (es un piso: el backend pagina y suele traer más).
+            {/* ↑ Se aclara el máximo solicitado; la cantidad recibida puede ser
+                menor por la disponibilidad de LinkedIn y los filtros aplicados. */}
+            Última corrida: se solicitaron hasta {effectiveLimit} ofertas.
           </div>
         )}
 

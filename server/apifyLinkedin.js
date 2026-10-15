@@ -35,18 +35,10 @@ const DEFAULT_MAX_RESULTS = 200;
 //   de 1000 (más allá el actor no rinde y el costo se dispara por nada).
 const MIN_RESULTS = 20;
 const MAX_RESULTS_CAP = 1000;
-// ↑ LinkedIn devuelve ~25 ofertas por página de búsqueda. Este número es el que
-//   convierte "cuántas ofertas quiero" en "cuántas páginas tengo que pedir".
-const RESULTS_PER_PAGE = 25;
-// ↑ Máximo de páginas por corrida. Es lo que rompe el techo de ~1000 resultados
-//   POR URL: más allá de 8 páginas ya son 200 ofertas y no aporta nada nuevo.
-//   El factor limitPerSource del actor reparte el total entre TODAS las URLs, así
-//   que 8 páginas son 8 x 25 = 200, exactamente el default.
-const MAX_PAGES = 8;
 // ↑ Timeout de la ejecución, en SEGUNDOS, que va en la query string de Apify.
 //   300 es el MÁXIMO que acepta el endpoint síncrono de Apify (por arriba
 //   devuelve 408), así que es el techo real de esta integración. Antes eran 180,
-//   insuffcientes en cuanto se piden varias páginas.
+//   insuficientes para completar búsquedas grandes.
 const APIFY_TIMEOUT_S = 300;
 // ↑ Temporizador del AbortController, en MILISEGUNDAS. Tiene que ser SIEMPRE
 //   MAYOR que el de Apify (300 s) para que el error lo veamos nosotros con un
@@ -75,12 +67,6 @@ export function maxResults(limit) {
   if (fromEnv !== undefined && fromEnv !== '') return clamp(fromEnv);
   // ↓ PRIORIDAD 3: el default de arriba.
   return DEFAULT_MAX_RESULTS;
-}
-
-// ↑ Cuántas páginas de resultados hay que pedir para llegar al límite pedido.
-//   El mínimo es 1 (nunca se pide cero páginas) y el máximo MAX_PAGES.
-function pageCount(limit) {
-  return Math.min(MAX_PAGES, Math.max(1, Math.ceil(limit / RESULTS_PER_PAGE)));
 }
 
 // ↑ Arma el texto de la query de búsqueda, algo como: qa OR "test automation" OR cypress.
@@ -118,18 +104,16 @@ function buildProfileKeywords() {
     .join(' OR ');
 }
 
-// ↑ Construye la URL de búsqueda de LinkedIn para una región Y una página.
+// ↑ Construye la URL de búsqueda de LinkedIn para una región.
 //   Se usa el objeto URL + searchParams en vez de concatenar strings a mano: él se
 //   encarga de escapar los caracteres especiales y los acentos, y arma el "?" y los "&".
-//   `pageNum` es el número de página del listado (0 = primera): antes estaba
-//   hardcodeado en 0, y por eso una sola URL topaba en ~1000 resultados.
-function searchUrl(region, pageNum = 0) {
+//   El actor pagina esta búsqueda hasta `limitPerSource`; enviar varias URLs de
+//   páginas con ese mismo límite multiplica el volumen y puede agotar el timeout.
+function searchUrl(region) {
   const url = new URL('https://www.linkedin.com/jobs/search/');
   // ↑ position=1 es el desplazamiento del listado: la primera oferta es la número 1
   url.searchParams.set('position', '1');
-  // ↑ pageNum: la página que se está pidiendo (0, 1, 2...). Cada página trae
-  //   ~25 ofertas nuevas, así que esto es lo que permite pedir más de 1000.
-  url.searchParams.set('pageNum', String(pageNum));
+  url.searchParams.set('pageNum', '0');
   // ↑ keywords: la query que armamos arriba, envuelta en paréntesis
   url.searchParams.set('keywords', `(${buildProfileKeywords()})`);
   // ↑ location: la traducción de la región, sacada de REGION_LOCATIONS
@@ -138,13 +122,6 @@ function searchUrl(region, pageNum = 0) {
   //   y el número de segundos: 30 días * 24 h * 60 min * 60 s. O sea, el filtro de fecha.
   url.searchParams.set('f_TPR', `r${DAYS_BACK * 24 * 60 * 60}`);
   return url.toString();
-}
-
-// ↑ Arma TODAS las URLs de la búsqueda: las páginas 0..N-1 de la misma query.
-//   El actor acepta un array de URLs y reparte `limitPerSource` entre todas, así
-//   que limitar la cantidad de páginas es lo que mantiene el costo acotado.
-function searchUrls(region, limit) {
-  return Array.from({ length: pageCount(limit) }, (_, page) => searchUrl(region, page));
 }
 
 // ↑ Normalizador "tolera cualquier cosa": convierte en texto plano lo que venga de Apify.
@@ -285,14 +262,10 @@ export async function searchLinkedInWithApify(region, options = {}) {
     throw httpError('Falta APIFY_API_TOKEN. Configúralo en el archivo local .env y reinicia el servidor.', 503);
   }
 
-  // ↑ Se resuelve el límite UNA sola vez y de ahí salen las páginas a pedir, así
-  //   el número que se le pasa a Apify y el que se reporta en resultLimit son
-  //   siempre el mismo (antes el `resultLimit` era un 50 que no era real).
+  // ↑ Se aplica el límite a una sola URL: Apify interpreta limitPerSource como
+  //   máximo por URL, no como un total repartido entre todas las URLs.
   const limit = maxResults(options.limit);
-  const pages = searchUrls(region, limit);
-  // ↑ La página 0 es la búsqueda "principal": es la que va como sourceUrl de cada
-  //   oferta, porque es la que el usuario puede volver a abrir para repetirla.
-  const sourceUrl = pages[0];
+  const sourceUrl = searchUrl(region);
 
   // ↑ TIMEOUT. El scrape de LinkedIn puede tardar minutos. El combo AbortController +
   //   setTimeout es un temporizador que cancela el fetch si la respuesta no llega a tiempo;
@@ -308,8 +281,7 @@ export async function searchLinkedInWithApify(region, options = {}) {
     //   - format=json: la respuesta viene como JSON y no como CSV.
     //   - clean=true: Apify borra del dataset los campos que vinieron vacíos.
     //   - timeout=300: segundos máximos que Apify espera antes de cortar la ejecución
-    //     (es su máximo para la API síncrona; subió desde 180 porque ahora se piden
-    //     hasta 8 páginas y 180 s se quedaban cortos a mitad de camino).
+    //     (es su máximo para la API síncrona).
     response = await fetch(
       `https://api.apify.com/v2/acts/curious_coder~linkedin-jobs-scraper/run-sync-get-dataset-items?format=json&clean=true&timeout=${APIFY_TIMEOUT_S}`,
       {
@@ -321,14 +293,11 @@ export async function searchLinkedInWithApify(region, options = {}) {
           //   estándar de autenticarse en Apify, como una chave que abre la puerta.
           Authorization: `Bearer ${token}`,
         },
-        // ↑ Cuerpo de la ejecución: las URLs que armamos arriba y cuántas ofertas pedir
+        // ↑ Cuerpo de la ejecución: una URL para que el límite sea el total pedido.
         body: JSON.stringify({
-          // ↓ Varias páginas, no una sola: es lo que rompe el techo de ~1000 resultados
-          //   POR URL de LinkedIn. Con una sola URL(pageNum=0) el actor no tenía de
-          //   dónde sacar más ofertas, por más que se le pidieran.
-          urls: pages,
-          // ↓ El tope va acá, ya configurado (limit del body > APIFY_MAX_RESULTS > 200)
-          //   y acotado al rango 20..1000. El actor reparte este total entre las URLs.
+          urls: [sourceUrl],
+          // ↓ Apify interpreta este límite por URL; al enviar una sola, no se
+          //   multiplica el volumen por la cantidad de páginas.
           limitPerSource: limit,
           // ↑ autoConvertToAiSearch: el actor devuelve el texto ya limpio, listo para
           //   que el matcher lo compare contra el CV.
@@ -456,9 +425,8 @@ export async function searchLinkedInWithApify(region, options = {}) {
     checkedAt: new Date().toISOString(),
     // ↓ resultLimit ahora es el límite REAL de esta corrida (antes siempre 50).
     resultLimit: limit,
-    // ↓ Cuántas páginas de LinkedIn se pidieron: sirve para entender por qué una
-    //   búsqueda trajo menos de lo esperado (LinkedIn puede tener menos de 25 por página).
-    pages: pages.length,
+    // ↓ El actor gestiona la paginación dentro de la única URL de búsqueda.
+    pages: 1,
     // ↓ La URL de búsqueda usada, que es la que viaja también como sourceUrl de cada oferta.
     searchUrl: sourceUrl,
   };

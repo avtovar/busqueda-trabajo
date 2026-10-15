@@ -61,9 +61,8 @@ const REGION_NAMES = {
 //   (recibidos, sinLink, viejas, sinMatch, otrasRegiones): mostrarlo crudo sería
 //   "recibidos 100 / sinLink 3", que no responde la pregunta del usuario ("¿por
 //   qué veo 60 y no 200?"). Cada fila tiene su etiqueta en castellano y una
-//   frase corta que explica POR QUÉ se perdió cada cosa.
-//   Se devuelve el total perdido además del detalle, porque la pregunta del
-//   <summary> se arma con esa resta y no con `stats.total` (que no existe).
+//   frase corta que explica POR QUÉ se perdió cada cosa. Se devuelve cuántas
+//   quedaron en la región solicitada, restando todas las pérdidas de lo recibido.
 function buildStatsReport(meta) {
   const stats = meta?.stats;
   if (!stats) return null;
@@ -80,10 +79,10 @@ function buildStatsReport(meta) {
     .sort((a, b) => b[1].length - a[1].length);
 
   const items = [
-    { label: 'Le pedimos a LinkedIn', value: num(stats.recibidos), hint: 'ofertas crudas' },
+    { label: 'Recibidas de Apify', value: num(stats.recibidos), hint: 'ofertas crudas' },
     { label: 'Sin link directo', value: num(stats.sinLink), hint: 'no se pueden mostrar' },
     { label: 'Muy viejas', value: num(stats.viejas), hint: 'fuera de la ventana de 30 días' },
-    { label: 'Repetidas', value: num(stats.duplicados), hint: 'la misma oferta en dos páginas' },
+    { label: 'Repetidas', value: num(stats.duplicados), hint: 'la misma oferta más de una vez' },
     { label: 'Sin match con tu CV', value: num(stats.sinMatch), hint: 'no son de QA o no coinciden' },
     {
       label: 'En otra región',
@@ -95,24 +94,17 @@ function buildStatsReport(meta) {
   //   pena mirar es dónde se perdieron ofertas, no una lista de ceros.
 
   const perdidas = num(stats.sinLink) + num(stats.viejas) + num(stats.duplicados) + num(stats.sinMatch) + num(stats.otrasRegiones);
-  // ↑ Los cinco motivos de descarte, sumados. La resta del <summary> es
-  //   guardados - perdidas, NO recibidos - pedidas: los recibidos incluyen los
-  //   duplicados, que también se descartaron, y con la otra cuenta el número del
-  //   summary no cerraba con ninguna de las filas de la tabla.
-  // ↑ La resta del <summary> se hace con ESTOS cinco, no con recibidos - pedido:
-  //   `stats.recibidos` incluye duplicados que sí se descartaron, y pedir - recibidas
-  //   daba un número que no cerraba con ninguna de las filas de arriba.
+  // ↑ Se resta de lo recibido: `guardados` ya excluye links ausentes, ofertas viejas
+  //   y duplicados, por lo que usarlo como base volvería a descontarlos.
 
   return {
     pedidas: num(meta.resultLimit) || 0,
-    guardados: num(stats.guardados),
+    enRegion: Math.max(0, num(stats.recibidos) - perdidas),
     perdidas,
     items,
   };
-  // ↑ No se manda la cantidad que quedó en pantalla a propósito: esa lista pasa
-  //   por el filtro de % de match, así que su número mezcla dos cosas (lo que
-  //   descartó Apify y lo que filtró el usuario). Por eso el <summary> habla de
-  //   la corrida, y el total filtrado ya está en el texto de estado de arriba.
+  // ↑ No se manda la cantidad que quedó en pantalla a propósito: la lista visible
+  //   también pasa por el filtro de % de match elegido por el usuario.
 }
 
 function getSavedTheme() {
@@ -372,9 +364,8 @@ export default function App() {
     //   obsoleto un mensaje que decía "esto no lo toqué".
     try {
       const data = await searchLinkedInJobs(region, apifyLimit);
-      // ↑ Se manda el limit de la toolbar. Ojo con el contrato: la respuesta
-      //   trae MÁS de lo pedido (el backend pagina hasta 8 páginas), así que
-      //   `total` NO tiene que coincidir con lo que dice el botón.
+      // ↑ Se manda el máximo elegido en la toolbar. La búsqueda usa una sola URL;
+      //   el actor limita los resultados de esa fuente a este valor.
 
       // ↓ Se guarda la respuesta COMPLETA en `linkedinMeta` y NO en jobsData.
       //   Antes era al revés y por eso la lista se perdía: `jobs` es solo el
@@ -545,10 +536,7 @@ export default function App() {
       return loading ? 'Calculando la propuesta de interés…' : 'Mercado QA relevado en todas las regiones, comparado contra tu CV.';
     }
     if (loading) return 'Cargando…';
-    if (searchingLinkedIn) return `Consultando LinkedIn con Apify (desde ${apifyLimit} ofertas; puede devolver más)…`;
-      // ↑ El "máximo 50" de antes era mentira: el backend pagina hasta 8 páginas.
-        //   Y no dice "cuántas vas a ver" sino "desde cuántas", porque el número
-        //   pedido es un piso (en la prueba real: pedí 50, quedaron 78).
+    if (searchingLinkedIn) return `Consultando LinkedIn con Apify (hasta ${apifyLimit} ofertas)…`;
     if (linkedinSearchError) return `Búsqueda de LinkedIn: ${linkedinSearchError}`;
     if (refreshNote) return refreshNote;
       // ↑ El aviso del refresh va antes que el conteo porque explica una

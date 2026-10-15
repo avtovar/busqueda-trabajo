@@ -83,17 +83,18 @@ de 50 por la de las fuentes gratuitas. De ahí la sensación de "se pierden".
 
 ---
 
-## 3. Lo que se corrigió (backend) — aplicado, sin commitear
+## 3. Lo que se corrigió (backend)
 
-> `git status`: modificados `.env.example`, `README.md`, `server/apifyLinkedin.js`,
-> `server/history.js`, `server/index.js`; nuevo `server/portal.js`. **Nada commiteado todavía.**
+El registro siguiente resume el cambio original del backend; el estado de Git mencionado
+en la versión anterior de esta memoria era una foto histórica y no describe el working tree actual.
 
-- **Límite configurable** — `apifyLinkedin.js`: `maxResults(limit)` con la misma cota en
-  los tres orígenes. Prioridad: `limit` del body > `APIFY_MAX_RESULTS` > `200`. Clamp duro
-  20..1000 (`MIN_RESULTS`/`MAX_RESULTS_CAP`), `Number()` tolerante a texto. Se paginó:
-  `pageCount(limit)` arma hasta `MAX_PAGES = 8` URLs, y `searchUrl(region, pageNum)` ya no
-  fija `pageNum=0`. Timeout subido a 300 s de Apify / `CLIENT_TIMEOUT_MS = 320_000` en el
-  cliente (el temporizador del cliente tiene que quedar **siempre** por encima).
+- **Límite configurable** — `apifyLinkedin.js`: `maxResults(limit)` con prioridad
+  `limit` del body > `APIFY_MAX_RESULTS` > `200`, clamp 20..1000. La implementación
+  anterior creaba hasta 8 URLs y enviaba el límite entero como `limitPerSource` para
+  cada una. Esto multiplicaba la cantidad solicitada; el parámetro es un máximo *por
+  URL*, según el esquema público del actor. La corrección actual manda una sola URL,
+  dejando que el actor la pagine hasta el límite solicitado. Se mantiene el timeout
+  síncrono de Apify en 300 s y el del cliente en 320 s.
 - **Persistencia** — `index.js:292-352`: el handler ahora llama a `recordSearch(data.regions || {})`
   con **todos** los buckets, no solo el pedido. Devuelve `saved: { ok, total, message }`.
   Si el guardado falla **no se rompe la búsqueda** (el usuario ya pagó la ejecución) pero
@@ -146,13 +147,14 @@ del server, se arrancó uno **nuevo** y `GET /api/history?region=argentina` devo
 **78 ofertas de LinkedIn intactas**, con link, portal y `activo=true`. Los datos viven en
 disco, no en memoria. La persistencia funciona.
 
-Dos cosas que confirmó la prueba y que no se ven leyendo el código:
+La prueba histórica confirmó la persistencia y también dejó en evidencia la
+multiplicación que luego se corrigió:
 
-- **Pedir 50 guarda 78.** `pageCount(50)` = `ceil(50/25)` = 2 páginas, y a cada una se le
-  pasa `limitPerSource` (o sea, hasta 50 por URL): ~100 crudos → 78 únicos con score > 0.
-  Como `recordSearch()` recibe **todos** los buckets, además se guardan las que
-  `assignRegion()` había mandado a otra región. Es el bug de "solo me da los 50" resuelto:
-  el número que pedís es un piso, no un techo.
+- **Pedir 50 guardó 78.** `pageCount(50)` generó 2 URLs, con un máximo de 50 resultados
+  por URL: ~100 crudos → 78 únicos con score > 0. `recordSearch()` recibió todos los
+  buckets, incluidas las ofertas que `assignRegion()` ubicó en otra región. Esa cantidad
+  superior al límite no era comportamiento deseado: el límite se aplicaba por URL y la
+  implementación actual ya envía una sola.
 - **La clave con link funciona en la práctica.** En la muestra hay *dos* entradas con el
   mismo título y la misma empresa (FullStack, "QA Automation Engineer Lead") pero con
   `applyUrl` distinto: quedaron separadas. Con la `keyOf` vieja se habrían pisado y se
@@ -173,24 +175,16 @@ muerre con `EADDRINUSE` sin avisar nada útil. Para las pruebas, usar 3100.
 
 ---
 
-## 4. Lo que falta (frontend) — es la mitad del arreglo
+## 4. Frontend de LinkedIn — implementado
 
-El backend ya manda `portal`, `sourceUrl`, `saved`, `stats` y `checkedAt`. **Nadie los lee todavía.**
+El frontend ahora permite elegir el límite y lo manda en el body del POST. Muestra el
+resultado del guardado, el momento de la última corrida y las estadísticas de descarte.
+Las tarjetas y el modal presentan el portal y usan el link directo o, si falta, la URL
+de búsqueda del portal. `App.jsx` también conserva los buckets de todas las regiones de
+la respuesta, de modo que las ofertas reclasificadas no se pierden al cambiar de pestaña.
 
-- `Toolbar.jsx:175-177` sigue diciendo *"limitada a 50 resultados"* y *"Buscar con Apify ·
-  50 máx."*. **Eso ya es falso**: el default es 200 y es configurable. También falta el
-  control para elegir el `limit` y mandarlo en el body del POST.
-- `JobList.jsx` no renderiza `applyUrl`. La tarjeta muestra `company · source` y nada más.
-  Ojo: la tarjeta es un `<button className="job-open">` y **HTML no permite un `<a>` dentro
-  de un `<button>`** — el link tiene que ir afuera, como el botón "Quitar de mi lista" (línea 317).
-- `JobDetailModal.jsx:168` esconde el botón si `applyUrl` está vacío o es `'#'`, así que
-  esas ofertas se quedan sin destino. Debería caer a `sourceUrl` ("Buscar en {portal}").
-- `App.jsx` no muestra `saved` (el usuario no tiene forma de saber si se guardó), ni
-  `checkedAt`, ni `stats`. `handleLinkedInSearch()` reemplaza `jobsData` entero.
-- `api.js` `searchLinkedInJobs()` tiene que aceptar y mandar el `limit`.
-
-Los tres casos que el usuario pidió se cierran solo cuando el frontend renderice el link
-y el origen: en la tarjeta (link directo + badge de portal) y en el modal (nunca sin destino).
+La interfaz presenta el número pedido como máximo. LinkedIn puede devolver menos ofertas
+únicas tras aplicar disponibilidad, fecha, link, deduplicación y match con el CV.
 
 ---
 
@@ -228,10 +222,9 @@ Corolario: **el token se lee una vez, al arrancar**. Cambiar `.env` exige reinic
 
 ---
 
-## 7. Desactualizado, para que nadie se confíe
+## 7. Mantenimiento de documentación
 
-- `DOCUMENTACION.md` menciona `server/portal.js` pero **no** menciona `APIFY_MAX_RESULTS`,
-  ni el contrato nuevo de `/api/linkedin-search` (`regions`, `stats`, `saved`), ni el
-  paginado multi-página. Está medio al día; `README.md` sí está actualizado.
-- `README.md:368` dice que el actor "trae hasta `MAX_RESULTS=50` ofertas" — era cierto
-  cuando se escribió, ya no. El texto del `README` sobre el costo sigue siendo válido.
+- `README.md` describe el contrato actual y el uso de una sola URL para evitar multiplicar
+  el límite por cada URL enviada al actor.
+- `DOCUMENTACION.md` conserva secciones históricas del CI; si se cambia el endpoint o su
+  política de costo, sincronizar esa sección con el contrato de `README.md`.

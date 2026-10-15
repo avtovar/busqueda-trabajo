@@ -124,10 +124,8 @@ export async function refreshJobs() {
 //   cuesta plata; si falló, el usuario tiene que enterarse, y el componente que
 //   llama es el que muestra el mensaje de error.
 // ↑ `limit` es opcional: si viene, el backend lo usa (tiene prioridad sobre
-//   APIFY_MAX_RESULTS). El backend lo acota a 20..1000 y PAGINA hasta 8 páginas,
-//   así que el número es un piso: pedir 50 puede devolver 78. Se manda siempre
-//   el valor del control de la toolbar para que lo que dice la pantalla sea
-//   exactamente lo que se ejecutó.
+//   APIFY_MAX_RESULTS). Se acota a 20..1000 y se aplica como máximo a una sola
+//   URL, evitando multiplicar la cantidad por las páginas enviadas al actor.
 export async function searchLinkedInJobs(region, limit) {
   let response;
   // ↑ `let` porque se asigna adentro del try y se usa después del catch.

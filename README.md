@@ -145,10 +145,11 @@ Después editá `.env` y completá lo que necesites.
 
 ### Sobre `APIFY_MAX_RESULTS`
 
-La búsqueda de LinkedIn pide sus resultados **paginado**: el actor de Apify
-`curious_coder~linkedin-jobs-scraper` recibe un array de URLs y devuelve unas 25
-ofertas por cada una, así que para traer más ofertas se piden más páginas de
-búsqueda (hasta 8, que es lo que el actor procesa razonablemente).
+La búsqueda usa una sola URL de LinkedIn y deja que el actor de Apify
+`curious_coder~linkedin-jobs-scraper` recorra sus páginas hasta el límite solicitado.
+`limitPerSource` se aplica **a cada URL**: enviar varias páginas con el mismo límite
+multiplicaba el volumen y podía hacer que la llamada síncrona agotara su tiempo de espera.
+El límite se acota a 1.000, que es el máximo aproximado que LinkedIn devuelve por búsqueda.
 
 - **Prioridad**: el `limit` que mande el frontend en el body de
   `POST /api/linkedin-search` > `APIFY_MAX_RESULTS` del `.env` > `200`.

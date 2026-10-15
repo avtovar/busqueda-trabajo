@@ -221,9 +221,9 @@ Qué tener en cuenta al decidir, sin volverlo un informe de mercado:
 | Factor | Dato concreto |
 | ------ | ------------- |
 | Modelo de cobro | Apify factura **por ejecución** del actor, no por consulta. El costo escala con la cantidad de búsquedas, no con la cantidad de usuarios |
-| Volumen de una corrida | `MAX_RESULTS = 50`, que se manda como `limitPerSource` al actor y vuelve como `resultLimit` en la respuesta |
-| Modo de la llamada | `run-sync-get-dataset-items` es **síncrono**: lanza el actor y espera el dataset terminado. El `timeout` del request es de **180 s** |
-| Impacto en el CI | Esos 180 s tienen que entrar en el `timeout-minutes` del job (hoy 10), y el `--max-time` del `check` (hoy 90 s) necesitaría un margen mayor |
+| Volumen de una corrida | `limit` del request (default 200, clamp 20..1000), enviado una sola vez como `limitPerSource` para una URL; vuelve como `resultLimit` |
+| Modo de la llamada | `run-sync-get-dataset-items` es **síncrono**: lanza el actor y espera el dataset terminado. El `timeout` del request es de **300 s**, con 320 s en el cliente |
+| Impacto en el CI | Las búsquedas pagas están excluidas deliberadamente del CI; no reactivar el check de LinkedIn sin autorización explícita |
 | Unicidad | Al reactivarlo, ese pasa a ser **el único** check del pipeline capaz de gastar plata. Los demás siguen siendo gratuitos |
 | Recomendación de diseño | Si se activa, manual y consciente. Un deploy automático que corre en cada push convierte cada commit en un gasto posible, que es exactamente el escenario que esta política busca cerrar |
 
