@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 // ↑ Lee archivos del disco (lo usa para servir el frontend compilado)
 import { readFile } from 'node:fs/promises';
 // ↑ Arma rutas de archivos y detecta la extensión para elegir el Content-Type
-import { join, extname } from 'node:path';
+import { join, extname, sep } from 'node:path';
 // ↑ Convierte la URL del módulo actual en una ruta de carpeta válida
 import { fileURLToPath } from 'node:url';
 // ↑ Perfil estructurado de Ali (skills, keywords, regiones): se sirve en /api/profile
@@ -411,6 +411,11 @@ const server = createServer(async (req, res) => {
   if (pathname === '/' || pathname === '') pathname = '/index.html';
   // ↑ Convierte la URL en una ruta real dentro de frontend/dist
   const filePath = join(PUBLIC_DIR, pathname);
+  // ↑ Protección de seguridad: evita path traversal verificando que la ruta quede dentro de PUBLIC_DIR
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + sep)) {
+    res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end('403 - Forbidden');
+  }
   // ↑ Extrae la extensión del archivo para elegir el Content-Type correcto
   const ext = extname(filePath);
   try {
